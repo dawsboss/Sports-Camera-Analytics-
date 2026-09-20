@@ -1,0 +1,87 @@
+# The M2 skeleton: FastAPI, Postgres, MinIO, Redis with RQ, and a worker that
+# runs S0 and S1. Raw match video never leaves this stack.
+#
+#   docker compose up --build
+#   curl -F file=@match.mp4 -F capture_mode=followcam -F pitch_length=100 -F pitch_width=64 localhost:8000/matches
+#
+# MinIO's console is on :9001 and the API's docs on :8000/docs.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sideline
+      POSTGRES_PASSWORD: sideline
+      POSTGRES_DB: sideline
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sideline"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sideline
+      MINIO_ROOT_PASSWORD: sideline-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment: &env
+      SIDELINE_DB_URL: postgresql+psycopg://sideline:sideline@postgres:5432/sideline
+      SIDELINE_REDIS_URL: redis://redis:6379/0
+      SIDELINE_MINIO_ENDPOINT: minio:9000
+      SIDELINE_MINIO_ACCESS_KEY: sideline
+      SIDELINE_MINIO_SECRET_KEY: sideline-secret
+      SIDELINE_MINIO_BUCKET: sideline
+      SIDELINE_INLINE_JOBS: "0"
+      SIDELINE_DATA_DIR: /data
+    ports:
+      - "8000:8000"
+    volumes:
+      - work:/data
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["sideline", "worker"]
+    environment: *env
+    volumes:
+      - work:/data
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+volumes:
+  postgres:
+  minio:
+  work:

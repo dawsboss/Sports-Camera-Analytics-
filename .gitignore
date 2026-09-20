@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+# Match footage and every stage artifact stay on the homelab, never in git.
+data/
+spike/out/
+*.mp4
+*.mkv
+*.mov
+*.parquet
+.env

@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # Everything the suite needs runs on a CPU with no GPU, no Redis, no
+      # MinIO and no Postgres: registration is checked on synthetic frames,
+      # storage against a local directory, the database against SQLite and
+      # the queue inline. The compose stack is the only place the real
+      # services are exercised.
+      - run: pip install -e ".[service,dev]"
+      - run: pytest
