@@ -14,8 +14,9 @@ output needs, and the order of the next work. In short: M1 (classical
 registration) fails the gate on real footage and the measurements say
 why; a pretrained line network already does better and is the next
 registrar after fine-tuning; players are detected off the shelf; the
-ball is found by no model tried, and a ball detector trained on this
-footage is the gate for everything possession-shaped. M2 (the skeleton)
+ball is detected 43% of samples on worn turf and 73% on green, with a
+bridgeable median gap and an unbridgeable tail, so a fine-tuned ball
+detector is the gate for everything possession-shaped. M2 (the skeleton)
 is built. M3 onward is not started.
 
 ## Required after every change
