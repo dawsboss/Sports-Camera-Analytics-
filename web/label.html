@@ -26,84 +26,113 @@
   }
   * { box-sizing: border-box; }
   button { font: inherit; color: inherit; cursor: pointer; }
-  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible {
+  button:focus-visible, input:focus-visible, textarea:focus-visible {
     outline: 2px solid var(--flag); outline-offset: 2px;
   }
+  h1, h2, h3 { margin: 0; }
 
-  .app { display: flex; flex-direction: column; height: 100%; }
+  /* ================= start screen ================= */
+  .start {
+    height: 100%; overflow-y: auto;
+    padding: 26px 18px calc(28px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-direction: column; gap: 18px;
+    max-width: 620px; margin: 0 auto;
+  }
+  .brand { display: flex; flex-direction: column; gap: 5px; }
+  .brand h1 { font-size: 26px; letter-spacing: -.02em; }
+  .brand p { margin: 0; color: var(--muted); font-size: 13.5px; max-width: 46ch; }
+  .warn {
+    border: 1px solid #5C3524; background: #2A1A12; border-radius: 11px;
+    padding: 13px 15px; display: flex; flex-direction: column; gap: 8px;
+    font-size: 13px; line-height: 1.5; color: #E8C4B2;
+  }
+  .warn b { color: #FFD9C9; }
+  .warn .wtitle { font-weight: 700; color: var(--flag); font-size: 13.5px; }
+  .sectitle {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .13em;
+    color: var(--muted); font-weight: 600;
+  }
+  .matchlist { display: flex; flex-direction: column; gap: 9px; }
+  .matchbtn {
+    text-align: left; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 15px 16px; display: flex; flex-direction: column; gap: 3px;
+    width: 100%;
+  }
+  .matchbtn:hover, .matchbtn:active { border-color: var(--flag); }
+  .matchbtn .n { font-weight: 700; font-size: 16px; }
+  .matchbtn .d { font-size: 12.5px; color: var(--muted); }
+  .matchbtn .tags { font-family: var(--mono); font-size: 11.5px; color: var(--grass); margin-top: 3px; }
+  .matchbtn .tags.none { color: var(--muted); }
+  .linkrow { display: flex; flex-direction: column; gap: 8px; }
+  .linkbtn {
+    background: none; border: 0; padding: 9px 0; text-align: left;
+    color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  .linkbtn:hover { color: var(--chalk); }
+  .linkbtn span:last-child { color: var(--line); font-size: 17px; }
 
-  /* ---------- top strip ---------- */
+  /* ================= work screen ================= */
+  .work { display: none; flex-direction: column; height: 100%; }
+  body.working .work { display: flex; }
+  body.working .start { display: none; }
+
   .top {
     display: flex; align-items: center; gap: 8px;
-    padding: 8px 12px; background: var(--panel);
+    padding: 7px 10px; background: var(--panel);
     border-bottom: 1px solid var(--line); flex: none;
   }
-  .modes { display: flex; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+  .back {
+    background: var(--raised); border: 1px solid var(--line); border-radius: 9px;
+    width: 34px; height: 32px; flex: none; font-size: 15px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modes { display: flex; background: var(--ground); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
   .modes button {
-    background: none; border: 0; border-radius: 6px; padding: 5px 11px;
-    font-size: 12px; font-weight: 600; color: var(--muted);
+    background: none; border: 0; border-radius: 7px; padding: 6px 13px;
+    font-size: 12.5px; font-weight: 700; color: var(--muted);
   }
   .modes button[aria-pressed=true] { background: var(--flag); color: #1A0D08; }
   .top .spacer { flex: 1; }
   .counts { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
   .counts b { color: var(--chalk); font-weight: 600; }
-  .iconbtn {
-    background: var(--raised); border: 1px solid var(--line); border-radius: 8px;
-    padding: 6px 10px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  .more {
+    background: var(--raised); border: 1px solid var(--line); border-radius: 9px;
+    width: 34px; height: 32px; flex: none; font-size: 16px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
   }
-  .iconbtn:hover { border-color: var(--muted); }
-  .iconbtn[aria-pressed=true] { border-color: var(--flag); color: var(--flag); }
 
-  /* ---------- stage ---------- */
   .stagewrap {
     flex: 1; min-height: 0; position: relative; overflow: hidden;
     background: #0B0A07; display: flex; align-items: center; justify-content: center;
   }
-  .zoomer {
-    position: relative; width: 100%; max-height: 100%;
-    transition: transform .18s ease; will-change: transform;
-  }
-  video {
-    display: block; width: 100%; height: auto; max-height: 100%;
-    background: #000; touch-action: manipulation;
-  }
-  .marker, .ghost {
-    position: absolute; border-radius: 50%; pointer-events: none;
-  }
+  .zoomer { position: relative; width: 100%; max-height: 100%; transition: transform .18s ease; will-change: transform; }
+  video { display: block; width: 100%; height: auto; max-height: 100%; background: #000; touch-action: manipulation; }
+
+  .marker, .ghost { position: absolute; border-radius: 50%; pointer-events: none; }
   .marker {
-    width: 34px; height: 34px; margin: -17px 0 0 -17px;
-    border: 2px solid var(--flag);
+    width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 2px solid var(--flag);
     box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 0 14px rgba(242,96,60,.5);
   }
   .marker::after { content: ""; position: absolute; inset: 14px; border-radius: 50%; background: var(--flag); }
-  .ghost {
-    width: 26px; height: 26px; margin: -13px 0 0 -13px;
-    border: 1px dashed rgba(242,239,228,.4);
-  }
+  .ghost { width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 1px dashed rgba(242,239,228,.45); }
   .zoomed .marker { width: 14px; height: 14px; margin: -7px 0 0 -7px; border-width: 1px; }
   .zoomed .marker::after { inset: 5px; }
   .zoomed .ghost { width: 10px; height: 10px; margin: -5px 0 0 -5px; }
 
-  /* pitch-mode pins drawn over the video */
   .pin {
     position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px;
     border-radius: 50%; pointer-events: none;
-    display: flex; align-items: center; justify-content: center;
-    font-family: var(--mono); font-size: 9px; font-weight: 600;
   }
-  .pin.set { background: var(--grass); border: 2px solid #12210A; color: #12210A; }
-  .pin.armed { background: var(--flag); border: 2px solid #1A0D08; color: #1A0D08; box-shadow: 0 0 12px rgba(242,96,60,.7); }
-  .pin.pred {
-    background: transparent; border: 2px dashed rgba(127,163,184,.85); color: var(--sky);
-    pointer-events: auto; cursor: pointer;
-  }
-  .zoomed .pin { width: 12px; height: 12px; margin: -6px 0 0 -6px; font-size: 0; border-width: 1px; }
+  .pin.set { background: var(--grass); border: 2px solid #12210A; }
+  .pin.pred { background: transparent; border: 2px dashed rgba(127,163,184,.9); pointer-events: auto; cursor: pointer; }
+  .zoomed .pin { width: 12px; height: 12px; margin: -6px 0 0 -6px; border-width: 1px; }
 
   .hint {
     position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
-    background: rgba(11,10,7,.85); border: 1px solid var(--line); border-radius: 999px;
+    background: rgba(11,10,7,.86); border: 1px solid var(--line); border-radius: 999px;
     padding: 6px 14px; font-size: 12.5px; color: var(--chalk); pointer-events: none;
-    backdrop-filter: blur(6px); text-align: center; max-width: calc(100% - 24px);
+    text-align: center; max-width: calc(100% - 24px);
   }
   .hint b { color: var(--flag); }
   .badge {
@@ -112,36 +141,32 @@
     background: rgba(11,10,7,.8); border: 1px solid var(--line); color: var(--muted);
   }
   .badge b { color: var(--chalk); font-weight: 600; }
-  .blocked {
+  .stagemsg {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(440px, calc(100% - 32px));
+    width: min(430px, calc(100% - 28px));
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 18px; display: flex; flex-direction: column; gap: 12px;
-    box-shadow: var(--shadow); font-size: 13.5px; line-height: 1.55; color: var(--muted);
+    padding: 17px; display: flex; flex-direction: column; gap: 11px;
+    box-shadow: var(--shadow); font-size: 13px; line-height: 1.55; color: var(--muted);
   }
-  .blocked b { color: var(--chalk); font-weight: 600; }
+  .stagemsg h3 { color: var(--chalk); font-size: 15px; }
+  .stagemsg b { color: var(--chalk); font-weight: 600; }
 
-  /* ---------- pitch diagram ---------- */
   .diagram {
     flex: none; background: var(--panel); border-top: 1px solid var(--line);
-    padding: 8px 12px 4px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 7px 12px 3px; display: flex; flex-direction: column; align-items: center; gap: 3px;
   }
-  .diagram svg { width: 100%; max-width: 330px; height: auto; display: block; touch-action: manipulation; }
+  .diagram svg { width: 100%; max-width: 320px; height: auto; display: block; touch-action: manipulation; }
   .dg-line { stroke: var(--line); stroke-width: 1.4; fill: none; }
-  .dg-dot { fill: var(--raised); stroke: var(--muted); stroke-width: 1.2; cursor: pointer; }
+  .dg-dot { fill: var(--raised); stroke: var(--muted); stroke-width: 1.2; }
   .dg-dot.set { fill: var(--grass); stroke: #12210A; }
   .dg-dot.armed { fill: var(--flag); stroke: var(--chalk); stroke-width: 2; }
   .dg-hit { fill: transparent; cursor: pointer; }
-  .dg-name {
-    font-family: var(--mono); font-size: 10.5px; color: var(--muted);
-    height: 14px; text-align: center;
-  }
+  .dg-name { font-family: var(--mono); font-size: 10.5px; color: var(--muted); height: 14px; }
   .dg-name b { color: var(--flag); font-weight: 600; }
 
-  /* ---------- controls ---------- */
   .controls {
     flex: none; background: var(--panel); border-top: 1px solid var(--line);
-    padding: 9px 12px calc(9px + env(safe-area-inset-bottom, 0px));
+    padding: 9px 11px calc(9px + env(safe-area-inset-bottom, 0px));
     display: flex; flex-direction: column; gap: 8px;
   }
   .scrub { display: flex; align-items: center; gap: 9px; }
@@ -149,78 +174,75 @@
   .tc { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
   .row { display: flex; gap: 7px; }
   .btn {
-    flex: 1; border-radius: 10px; border: 1px solid var(--line); background: var(--raised);
-    padding: 12px 8px; font-weight: 600; font-size: 13.5px; text-align: center;
-    display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0;
+    flex: 1; border-radius: 11px; border: 1px solid var(--line); background: var(--raised);
+    padding: 13px 8px; font-weight: 600; font-size: 13.5px;
+    display: flex; align-items: center; justify-content: center; min-width: 0;
   }
-  .btn:hover:not(:disabled) { border-color: var(--muted); }
-  .btn:disabled { opacity: .4; cursor: default; }
-  .btn .k {
-    font-family: var(--mono); font-size: 10px; color: var(--muted);
-    border: 1px solid var(--line); border-radius: 4px; padding: 0 4px;
-  }
+  .btn:disabled { opacity: .38; cursor: default; }
   .btn.primary { background: var(--flag); border-color: var(--flag); color: #1A0D08; }
-  .btn.primary .k { color: #1A0D08; border-color: rgba(26,13,8,.35); }
   .btn.primary:disabled { background: var(--raised); border-color: var(--line); color: var(--chalk); }
-  .btn.narrow { flex: 0 0 auto; padding-inline: 13px; }
-  @media (max-width: 420px) { .btn .k { display: none; } }
+  .btn.narrow { flex: 0 0 auto; padding-inline: 15px; }
+  .btn[aria-pressed=true] { border-color: var(--flag); color: var(--flag); }
 
-  /* ---------- sheet ---------- */
+  /* ================= sheet ================= */
   .sheet {
-    position: fixed; inset: 0; z-index: 20; background: rgba(11,10,7,.72);
-    display: flex; align-items: flex-end; justify-content: center; backdrop-filter: blur(3px);
+    position: fixed; inset: 0; z-index: 30; background: rgba(11,10,7,.78);
+    display: flex; align-items: flex-end; justify-content: center;
   }
   .sheet .card {
     background: var(--panel); border: 1px solid var(--line);
-    border-radius: 16px 16px 0 0; width: 100%; max-width: 620px;
-    max-height: 88%; overflow-y: auto;
-    padding: 18px 18px calc(18px + env(safe-area-inset-bottom, 0px));
-    box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px;
+    border-radius: 18px 18px 0 0; width: 100%; max-width: 620px;
+    max-height: 86%; overflow-y: auto;
+    padding: 16px 18px calc(20px + env(safe-area-inset-bottom, 0px));
+    box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 13px;
   }
-  .sheet h2 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
-  .sheet h3 {
-    margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .12em;
-    color: var(--muted); font-weight: 600;
-  }
-  .field { display: flex; flex-direction: column; gap: 5px; }
-  .field label { font-size: 12px; color: var(--muted); }
+  .sheet .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--line); align-self: center; flex: none; }
+  .sheet h2 { font-size: 17px; }
+  .sheetrow { display: flex; gap: 8px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 12.5px; color: var(--muted); }
   input[type=text], textarea {
-    background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
-    color: var(--chalk); padding: 9px 10px; font-family: var(--mono); font-size: 13px;
+    background: var(--ground); border: 1px solid var(--line); border-radius: 9px;
+    color: var(--chalk); padding: 11px 11px; font-family: var(--mono); font-size: 13px;
     width: 100%; min-width: 0;
   }
-  textarea { resize: vertical; min-height: 120px; line-height: 1.4; }
-  .matchlist { display: flex; flex-direction: column; gap: 7px; }
-  .matchbtn {
-    text-align: left; background: var(--raised); border: 1px solid var(--line);
-    border-radius: 10px; padding: 11px 13px; display: flex; flex-direction: column; gap: 2px;
-  }
-  .matchbtn:hover { border-color: var(--flag); }
-  .matchbtn .n { font-weight: 600; font-size: 14px; }
-  .matchbtn .d { font-size: 12px; color: var(--muted); font-family: var(--mono); }
-  .stat { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  textarea { resize: vertical; min-height: 130px; line-height: 1.4; }
+  .stat { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; }
   .stat span:last-child { font-family: var(--mono); color: var(--chalk); }
   .stat span:first-child { color: var(--muted); }
   .note {
-    font-size: 12.5px; color: var(--muted); line-height: 1.5;
-    border-left: 2px solid var(--line); padding-left: 11px; margin: 0;
+    font-size: 12.5px; color: var(--muted); line-height: 1.55;
+    border-left: 2px solid var(--line); padding-left: 12px; margin: 0;
   }
   .note b { color: var(--chalk); font-weight: 600; }
-  .sheetrow { display: flex; gap: 8px; }
-  .modeflag { font-family: var(--mono); font-size: 11px; color: var(--grass); display: flex; align-items: center; gap: 6px; }
-  .modeflag i { width: 6px; height: 6px; border-radius: 50%; background: var(--grass); display: inline-block; flex: none; }
 </style>
 
-<div class="app">
+<div class="start" id="startScreen">
+  <div class="brand">
+    <h1>Sideline Tagger</h1>
+    <p>Tap the ball and the pitch markings on match footage. Those taps are the training
+       data — nothing else has ever seen these fields.</p>
+  </div>
+  <div id="startWarn"></div>
+  <div class="sectitle">Choose a match</div>
+  <div class="matchlist" id="matchList"></div>
+  <div class="linkrow">
+    <button class="linkbtn" id="linkCustom"><span>Open a direct video link</span><span>&rsaquo;</span></button>
+    <button class="linkbtn" id="linkExport"><span>Copy tags out</span><span>&rsaquo;</span></button>
+    <button class="linkbtn" id="linkHelp"><span>How the tagging works</span><span>&rsaquo;</span></button>
+  </div>
+</div>
+
+<div class="work" id="workScreen">
   <div class="top">
+    <button class="back" id="btnBackHome" title="Back to matches" aria-label="Back to matches">&#8592;</button>
     <div class="modes" role="group" aria-label="What to tag">
       <button id="modeBall" aria-pressed="true">Ball</button>
       <button id="modePitch" aria-pressed="false">Pitch</button>
     </div>
     <div class="spacer"></div>
-    <div class="counts" id="counts">no match</div>
-    <button class="iconbtn" id="btnZoom" aria-pressed="false" title="Zoom for precision">Zoom</button>
-    <button class="iconbtn" id="openMenu">Menu</button>
+    <div class="counts" id="counts"></div>
+    <button class="more" id="btnMore" title="More" aria-label="More">&#8943;</button>
   </div>
 
   <div class="stagewrap" id="stagewrap">
@@ -230,7 +252,7 @@
       <div class="marker" id="marker" hidden></div>
     </div>
     <div class="badge" id="badge" hidden></div>
-    <div class="hint" id="hint">Pick a match to start</div>
+    <div class="hint" id="hint" hidden></div>
   </div>
 
   <div class="diagram" id="diagram" hidden>
@@ -241,25 +263,23 @@
   <div class="controls">
     <div class="scrub">
       <span class="tc" id="tcNow">0:00</span>
-      <input type="range" id="seek" min="0" max="1000" value="0" step="1" aria-label="Position in match" disabled>
+      <input type="range" id="seek" min="0" max="1000" value="0" step="1" aria-label="Position in match">
       <span class="tc" id="tcEnd">0:00</span>
     </div>
     <div class="row" id="rowBall">
-      <button class="btn narrow" id="btnBack" disabled title="Previous sample">&larr;</button>
-      <button class="btn" id="btnNoBall" disabled>Not visible <span class="k">N</span></button>
-      <button class="btn primary" id="btnNext" disabled>Save &amp; next <span class="k">space</span></button>
+      <button class="btn narrow" id="btnBack" title="Previous sample">&#8592;</button>
+      <button class="btn" id="btnNoBall">Not visible</button>
+      <button class="btn primary" id="btnNext" disabled>Save &amp; next</button>
     </div>
     <div class="row" id="rowPitch" hidden>
-      <button class="btn narrow" id="btnUndoPin" disabled title="Remove the last point">&#8630;</button>
-      <button class="btn" id="btnSkipFrame" disabled>Skip frame</button>
-      <button class="btn primary" id="btnSavePitch" disabled>Save &amp; next <span class="k">space</span></button>
+      <button class="btn narrow" id="btnUndoPin" title="Remove the last point" disabled>&#8630;</button>
+      <button class="btn" id="btnSkipFrame">Skip</button>
+      <button class="btn primary" id="btnSavePitch" disabled>Save &amp; next</button>
     </div>
   </div>
 </div>
 
-<div class="sheet" id="sheet" hidden>
-  <div class="card" id="sheetCard"></div>
-</div>
+<div class="sheet" id="sheet" hidden><div class="card" id="sheetCard"></div></div>
 
 <script>
 (function () {
@@ -270,14 +290,15 @@
   // page needs: it records where you tapped, and the pipeline pulls the
   // matching frame from its own copy later.
   var MATCHES = [
-    { id: "20260919-flight", name: "19 Sept — Flight", note: "worn olive field · 67 min · the hard one",
+    { id: "20260919-flight", name: "19 Sept — Flight", note: "Worn olive field, 67 min. The hard one — start here.",
       url: "https://c.veocdn.com/2f8eec5a-ffbd-4fce-8aa5-9dfdbb6260a8/standard/machine/b296102c/video.mp4", fps: 29.97 },
-    { id: "20260920-future", name: "20 Sept — Future", note: "green school field · 68 min",
+    { id: "20260920-future", name: "20 Sept — Future", note: "Green school field, 68 min.",
       url: "https://c.veocdn.com/f1a1abd0-b054-43cd-997c-19804c2c4979/standard/machine/99b85fc1/video.mp4", fps: 29.97 }
   ];
+  var PAGES_URL = "https://dawsboss.github.io/Sports-Camera-Analytics-/label.html";
 
   var SAMPLE_STEP = 0.2;   // seconds; the pipeline samples at 5 fps
-  var BURST = 20;          // consecutive ball samples before jumping elsewhere
+  var BURST = 20;
   var STORE = "sidelinetagger.v2";
 
   // Roboflow's 32-vertex pitch, centimetres, origin at a corner. Adopted
@@ -304,7 +325,6 @@
     "corner R-top","pen R-top out","goal R-top out","goal R-bot out","pen R-bot out","corner R-bot",
     "circle left","circle right"
   ];
-  // 1-based pairs from the same config, for drawing the diagram.
   var E = [[1,2],[2,3],[3,4],[4,5],[5,6],[2,10],[3,7],[4,8],[5,13],[7,8],[10,11],[11,12],[12,13],
            [14,17],[1,14],[6,17],[25,30],[14,25],[17,30],[26,27],[27,28],[28,29],[23,24],
            [18,19],[19,20],[20,21],[26,18],[27,23],[28,24],[29,21],[1,25],[6,30]];
@@ -317,42 +337,32 @@
   var sheet = $("sheet"), sheetCard = $("sheetCard");
 
   var state = {
-    mode: "ball",
-    match: null,
-    labels: {},        // matchId -> { ball: {frame: rec}, kp: {frame: {idx: [x,y]}} }
-    pending: null,     // ball: {x,y} tapped, not yet saved
-    last: null,        // ball: previous saved point, drawn as a ghost
-    burstLeft: 0,
-    zoom: false,
-    pins: {},          // pitch: idx -> [x,y] for the current frame
-    armed: null,       // pitch: index of the point waiting to be placed
-    pred: null         // pitch: idx -> [x,y] predicted from the placed ones
+    mode: "ball", match: null, labels: {},
+    pending: null, last: null, burstLeft: 0, zoom: false,
+    pins: {}, armed: null, pred: null
   };
 
   /* ---------- storage ---------- */
   function load() {
-    try {
-      var raw = localStorage.getItem(STORE);
-      if (raw) state.labels = JSON.parse(raw) || {};
-    } catch (e) { /* private window or blocked storage: run without it */ }
+    try { var raw = localStorage.getItem(STORE); if (raw) state.labels = JSON.parse(raw) || {}; }
+    catch (e) { /* private window or blocked storage: run without it */ }
   }
   function save() {
     try { localStorage.setItem(STORE, JSON.stringify(state.labels)); }
-    catch (e) { /* quota or blocked: the copy-out in the menu still works */ }
+    catch (e) { /* quota or blocked: copying out still works */ }
   }
   function bag() {
     if (!state.match) return { ball: {}, kp: {} };
     var b = state.labels[state.match.id];
-    if (!b) { b = state.labels[state.match.id] = { ball: {}, kp: {} }; }
+    if (!b) b = state.labels[state.match.id] = { ball: {}, kp: {} };
     if (!b.ball) b.ball = {};
     if (!b.kp) b.kp = {};
     return b;
   }
   function tally(id) {
-    var b = state.labels[id] || {}, ball = b.ball || {}, kp = b.kp || {};
-    var seen = 0, vis = 0, k;
+    var b = state.labels[id] || {}, ball = b.ball || {}, kp = b.kp || {}, k;
+    var seen = 0, vis = 0, frames = 0, pts = 0;
     for (k in ball) if (Object.prototype.hasOwnProperty.call(ball, k)) { seen++; if (ball[k].vis) vis++; }
-    var frames = 0, pts = 0;
     for (k in kp) if (Object.prototype.hasOwnProperty.call(kp, k)) { frames++; pts += Object.keys(kp[k]).length; }
     return { seen: seen, vis: vis, kpFrames: frames, kpPoints: pts };
   }
@@ -369,8 +379,8 @@
   /* ---------- homography, for predicting the unplaced points ----------
      Four placed points fix the mapping from pitch to image, so the rest can
      be drawn where they must be and accepted with one tap instead of hunted
-     for. Normalised DLT, eight unknowns with h33 = 1, solved through the
-     normal equations — enough for a hint that a person then confirms. */
+     for. Normalised DLT, eight unknowns with h33 = 1, through the normal
+     equations — enough for a hint that a person then confirms. */
   function solveH(src, dst) {
     var n = src.length, i;
     if (n < 4) return null;
@@ -381,31 +391,25 @@
       var d = 0;
       for (k = 0; k < p.length; k++) d += Math.hypot(p[k][0] - cx, p[k][1] - cy);
       d /= p.length;
-      var s = d > 1e-9 ? Math.SQRT2 / d : 1;
-      var out = [];
+      var s = d > 1e-9 ? Math.SQRT2 / d : 1, out = [];
       for (k = 0; k < p.length; k++) out.push([(p[k][0] - cx) * s, (p[k][1] - cy) * s]);
       return { pts: out, s: s, cx: cx, cy: cy };
     };
-    var S = nr(src), D = nr(dst);
-    var A = [], b = [];
+    var S = nr(src), D = nr(dst), A = [], b = [];
     for (i = 0; i < n; i++) {
       var x = S.pts[i][0], y = S.pts[i][1], u = D.pts[i][0], v = D.pts[i][1];
       A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
       A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
     }
-    // normal equations
     var M = [], r, c, k2;
-    for (r = 0; r < 8; r++) {
-      M[r] = [];
-      for (c = 0; c < 9; c++) M[r][c] = 0;
-    }
+    for (r = 0; r < 8; r++) { M[r] = []; for (c = 0; c < 9; c++) M[r][c] = 0; }
     for (i = 0; i < A.length; i++) {
       for (r = 0; r < 8; r++) {
         for (c = 0; c < 8; c++) M[r][c] += A[i][r] * A[i][c];
         M[r][8] += A[i][r] * b[i];
       }
     }
-    for (c = 0; c < 8; c++) {                       // gaussian elimination
+    for (c = 0; c < 8; c++) {
       var piv = c;
       for (r = c + 1; r < 8; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
       if (Math.abs(M[piv][c]) < 1e-12) return null;
@@ -419,7 +423,6 @@
     var h = [];
     for (r = 0; r < 8; r++) h.push(M[r][8] / M[r][r]);
     var Hn = [[h[0], h[1], h[2]], [h[3], h[4], h[5]], [h[6], h[7], 1]];
-    // denormalise: H = Td^-1 * Hn * Ts
     var Ts = [[S.s, 0, -S.s * S.cx], [0, S.s, -S.s * S.cy], [0, 0, 1]];
     var Tdi = [[1 / D.s, 0, D.cx], [0, 1 / D.s, D.cy], [0, 0, 1]];
     var mul = function (P, Q) {
@@ -451,72 +454,62 @@
     for (i = 0; i < V.length; i++) {
       if (state.pins[i]) continue;
       var p = applyH(H, V[i]);
-      if (!p) continue;
-      if (p[0] < -0.08 || p[0] > 1.08 || p[1] < -0.08 || p[1] > 1.08) continue;
+      if (!p || p[0] < -0.08 || p[0] > 1.08 || p[1] < -0.08 || p[1] > 1.08) continue;
       out[i] = [Math.min(1, Math.max(0, p[0])), Math.min(1, Math.max(0, p[1]))];
     }
     state.pred = out;
   }
 
-  /* ---------- the pitch diagram ---------- */
+  /* ---------- pitch diagram ---------- */
   function buildDiagram() {
-    var w = 330, pad = 13;
-    var sx = (w - pad * 2) / PL, h = PW * sx + pad * 2;
+    var w = 320, pad = 13, sx = (w - pad * 2) / PL, h = PW * sx + pad * 2;
     var px = function (v) { return [pad + v[0] * sx, pad + v[1] * sx]; };
-    var s = '<svg viewBox="0 0 ' + w + ' ' + h.toFixed(0) + '" role="group" aria-label="Pitch points">';
-    var i, a, b2;
+    var s = '<svg viewBox="0 0 ' + w + ' ' + h.toFixed(0) + '" role="group" aria-label="Pitch points">', i, a, b2;
     for (i = 0; i < E.length; i++) {
       a = px(V[E[i][0] - 1]); b2 = px(V[E[i][1] - 1]);
       s += '<line class="dg-line" x1="' + a[0].toFixed(1) + '" y1="' + a[1].toFixed(1) +
            '" x2="' + b2[0].toFixed(1) + '" y2="' + b2[1].toFixed(1) + '"/>';
     }
-    s += '<circle class="dg-line" cx="' + px([PL/2, PW/2])[0].toFixed(1) + '" cy="' +
-         px([PL/2, PW/2])[1].toFixed(1) + '" r="' + (CCR * sx).toFixed(1) + '"/>';
+    a = px([PL / 2, PW / 2]);
+    s += '<circle class="dg-line" cx="' + a[0].toFixed(1) + '" cy="' + a[1].toFixed(1) + '" r="' + (CCR * sx).toFixed(1) + '"/>';
     for (i = 0; i < V.length; i++) {
       a = px(V[i]);
       s += '<circle class="dg-dot" id="dg' + i + '" cx="' + a[0].toFixed(1) + '" cy="' + a[1].toFixed(1) + '" r="3.4"/>';
       s += '<circle class="dg-hit" data-i="' + i + '" cx="' + a[0].toFixed(1) + '" cy="' + a[1].toFixed(1) + '" r="11"/>';
     }
-    s += "</svg>";
-    dgHost.innerHTML = s;
+    dgHost.innerHTML = s + "</svg>";
     dgHost.querySelector("svg").addEventListener("pointerdown", function (e) {
       var t = e.target;
       if (!t || !t.dataset || t.dataset.i === undefined) return;
       e.preventDefault();
-      arm(Number(t.dataset.i));
+      state.armed = (state.armed === Number(t.dataset.i)) ? null : Number(t.dataset.i);
+      draw();
     });
   }
-  function arm(i) {
-    state.armed = (state.armed === i) ? null : i;
-    draw();
-  }
   function nextUnplaced(from) {
-    // Pitch points cluster, so after placing one the neighbour is usually
-    // next. Fall back to scanning forward from where we were.
     var best = null, bd = Infinity, i;
-    if (from != null) {
-      for (i = 0; i < V.length; i++) {
-        if (state.pins[i] || i === from) continue;
-        var d = Math.hypot(V[i][0] - V[from][0], V[i][1] - V[from][1]);
-        if (d < bd) { bd = d; best = i; }
-      }
+    if (from == null) return null;
+    for (i = 0; i < V.length; i++) {
+      if (state.pins[i] || i === from) continue;
+      var d = Math.hypot(V[i][0] - V[from][0], V[i][1] - V[from][1]);
+      if (d < bd) { bd = d; best = i; }
     }
     return best;
   }
 
-  /* ---------- rendering ---------- */
+  /* ---------- drawing ---------- */
   function clearPins() {
     var old = zoomer.querySelectorAll(".pin");
     for (var i = 0; i < old.length; i++) old[i].remove();
   }
   function draw() {
+    if (!state.match) return;
     var isBall = state.mode === "ball";
     diagram.hidden = isBall;
     $("rowBall").hidden = !isBall;
     $("rowPitch").hidden = isBall;
     $("modeBall").setAttribute("aria-pressed", String(isBall));
     $("modePitch").setAttribute("aria-pressed", String(!isBall));
-    $("btnZoom").setAttribute("aria-pressed", String(state.zoom));
 
     marker.hidden = true; ghost.hidden = true;
     clearPins();
@@ -529,105 +522,85 @@
       ghost.hidden = !g || !!p;
       if (g && !p) { ghost.style.left = (g.x * 100) + "%"; ghost.style.top = (g.y * 100) + "%"; }
       $("btnNext").disabled = !p;
-      $("btnNoBall").disabled = !state.match;
-      $("btnBack").disabled = !state.match || vid.currentTime < SAMPLE_STEP;
-      if (!state.match) hint.textContent = "Pick a match to start";
-      else if (p) hint.hidden = true;
-      else hint.textContent = state.last ? "Tap the ball — dashed ring is where it was" : "Tap the ball";
-      hint.hidden = !!p && !!state.match;
+      $("btnBack").disabled = vid.currentTime < SAMPLE_STEP;
+      if (p) hint.hidden = true;
+      else { hint.textContent = state.last ? "Tap the ball — dashed ring is where it was" : "Tap the ball"; hint.hidden = false; }
     } else {
-      var i, el2, xy;
+      var i, node, xy;
       for (i in state.pins) {
         if (!Object.prototype.hasOwnProperty.call(state.pins, i)) continue;
         xy = state.pins[i];
-        el2 = document.createElement("div");
-        el2.className = "pin set";
-        el2.style.left = (xy[0] * 100) + "%"; el2.style.top = (xy[1] * 100) + "%";
-        el2.title = VN[i];
-        zoomer.appendChild(el2);
+        node = document.createElement("div");
+        node.className = "pin set";
+        node.style.left = (xy[0] * 100) + "%"; node.style.top = (xy[1] * 100) + "%";
+        node.title = VN[i];
+        zoomer.appendChild(node);
       }
       if (state.pred) {
         for (i in state.pred) {
           if (!Object.prototype.hasOwnProperty.call(state.pred, i)) continue;
           xy = state.pred[i];
-          el2 = document.createElement("div");
-          el2.className = "pin pred";
-          el2.style.left = (xy[0] * 100) + "%"; el2.style.top = (xy[1] * 100) + "%";
-          el2.title = "predicted: " + VN[i] + " — tap to accept";
-          el2.dataset.pred = i;
-          zoomer.appendChild(el2);
+          node = document.createElement("div");
+          node.className = "pin pred";
+          node.style.left = (xy[0] * 100) + "%"; node.style.top = (xy[1] * 100) + "%";
+          node.title = "predicted: " + VN[i] + " — tap to accept";
+          node.dataset.pred = i;
+          zoomer.appendChild(node);
         }
       }
       var nPins = Object.keys(state.pins).length;
       $("btnSavePitch").disabled = nPins < 4;
       $("btnUndoPin").disabled = nPins === 0;
-      $("btnSkipFrame").disabled = !state.match;
-      if (!state.match) { hint.textContent = "Pick a match to start"; hint.hidden = false; }
-      else if (state.armed != null) { hint.innerHTML = "Tap <b>" + VN[state.armed] + "</b> on the video"; hint.hidden = false; }
-      else if (nPins < 4) { hint.textContent = "Tap a point below, then tap it on the video"; hint.hidden = false; }
-      else if (state.pred && Object.keys(state.pred).length) { hint.textContent = "Tap a dashed point to accept it, or add more"; hint.hidden = false; }
-      else { hint.hidden = true; }
+      if (state.armed != null) { hint.innerHTML = "Now tap <b>" + VN[state.armed] + "</b> on the video"; hint.hidden = false; }
+      else if (nPins < 4) { hint.textContent = "Pick a point below, then tap it above"; hint.hidden = false; }
+      else if (state.pred && Object.keys(state.pred).length) { hint.textContent = "Tap a dashed ring to accept it"; hint.hidden = false; }
+      else hint.hidden = true;
       dgName.innerHTML = state.armed != null ? "placing <b>" + VN[state.armed] + "</b>"
-        : (nPins ? nPins + " placed · 4 needed to predict the rest" : "pick a point");
+        : (nPins ? nPins + " placed" + (nPins < 4 ? " · 4 needed" : " · tap the rings above") : "pick a point");
       for (i = 0; i < V.length; i++) {
-        var dot = document.getElementById("dg" + i);
+        var dot = $("dg" + i);
         if (!dot) continue;
         dot.classList.toggle("set", !!state.pins[i]);
         dot.classList.toggle("armed", state.armed === i);
       }
     }
 
-    if (state.match) {
-      var t = tally(state.match.id);
-      counts.innerHTML = isBall
-        ? "<b>" + t.seen + "</b> ball · " + t.vis + " seen"
-        : "<b>" + t.kpFrames + "</b> frames · " + t.kpPoints + " pts";
-      badge.hidden = false;
-      badge.innerHTML = "frame <b>" + frameOf(vid.currentTime) + "</b>"
-        + (isBall ? " · burst " + Math.min(BURST, BURST - state.burstLeft + 1) + "/" + BURST : "");
-    }
+    var t = tally(state.match.id);
+    counts.innerHTML = isBall ? "<b>" + t.seen + "</b> ball" : "<b>" + t.kpFrames + "</b> frames";
+    badge.hidden = false;
+    badge.innerHTML = "frame <b>" + frameOf(vid.currentTime) + "</b>"
+      + (isBall ? " · " + Math.min(BURST, BURST - state.burstLeft + 1) + "/" + BURST : "");
   }
 
   function setZoom(on, x, y) {
     state.zoom = on;
     zoomer.classList.toggle("zoomed", on);
     stagewrap.classList.toggle("zoomed", on);
-    if (on) {
-      zoomer.style.transformOrigin = ((x != null ? x : 0.5) * 100) + "% " + ((y != null ? y : 0.5) * 100) + "%";
-      zoomer.style.transform = "scale(4)";
-    } else {
-      zoomer.style.transform = "none";
-    }
+    zoomer.style.transformOrigin = ((x != null ? x : .5) * 100) + "% " + ((y != null ? y : .5) * 100) + "%";
+    zoomer.style.transform = on ? "scale(4)" : "none";
     draw();
   }
 
-  /* ---------- tapping the video ---------- */
+  /* ---------- tapping ---------- */
   // offsetX/Y are in the element's own untransformed coordinate space, so the
-  // CSS zoom needs no correction. The video box is set to the frame's exact
+  // CSS zoom needs no correction. The video box carries the frame's exact
   // aspect ratio, so there is no letterboxing to subtract.
-  function tapXY(e) {
-    var w = vid.clientWidth, h = vid.clientHeight;
-    if (!w || !h) return null;
-    return [Math.min(1, Math.max(0, e.offsetX / w)), Math.min(1, Math.max(0, e.offsetY / h))];
-  }
   vid.addEventListener("pointerdown", function (e) {
     if (!state.match) return;
-    var p = tapXY(e);
-    if (!p) return;
+    var w = vid.clientWidth, h = vid.clientHeight;
+    if (!w || !h) return;
+    var x = Math.min(1, Math.max(0, e.offsetX / w)), y = Math.min(1, Math.max(0, e.offsetY / h));
     if (state.mode === "ball") {
-      state.pending = { x: p[0], y: p[1] };
-      if (!state.zoom) setZoom(true, p[0], p[1]); else draw();
+      state.pending = { x: x, y: y };
+      if (!state.zoom) setZoom(true, x, y); else draw();
       return;
     }
     if (state.armed == null) { hint.textContent = "Pick a point below first"; hint.hidden = false; return; }
-    state.pins[state.armed] = p;
-    var was = state.armed;
-    state.armed = nextUnplaced(was);
+    state.pins[state.armed] = [x, y];
+    state.armed = nextUnplaced(state.armed);
     recomputePred();
     draw();
   });
-  // Accepting a predicted point is one tap, which is the whole reason the
-  // prediction exists.
   zoomer.addEventListener("pointerdown", function (e) {
     var t = e.target;
     if (!t || !t.dataset || t.dataset.pred === undefined) return;
@@ -640,10 +613,10 @@
   }, true);
 
   /* ---------- moving through the match ---------- */
-  function seekTo(t, then) {
+  function seekTo(t) {
     var dur = vid.duration || 0;
     t = Math.max(0, Math.min(dur ? dur - 0.05 : t, t));
-    var done = function () { vid.removeEventListener("seeked", done); syncScrub(); if (then) then(); };
+    var done = function () { vid.removeEventListener("seeked", done); syncScrub(); };
     vid.addEventListener("seeked", done);
     vid.currentTime = t;
   }
@@ -656,13 +629,13 @@
     }
     draw();
   }
-  function round4(v) { return Math.round(v * 10000) / 10000; }
+  function r4(v) { return Math.round(v * 10000) / 10000; }
 
   function commitBall(visible) {
     if (!state.match) return;
-    var f = frameOf(vid.currentTime);
-    bag().ball[f] = visible
-      ? { x: round4(state.pending.x), y: round4(state.pending.y), vis: 1, t: Math.round(vid.currentTime * 1000) }
+    if (visible && !state.pending) return;
+    bag().ball[frameOf(vid.currentTime)] = visible
+      ? { x: r4(state.pending.x), y: r4(state.pending.y), vis: 1, t: Math.round(vid.currentTime * 1000) }
       : { vis: 0, t: Math.round(vid.currentTime * 1000) };
     save();
     if (visible) state.last = { x: state.pending.x, y: state.pending.y };
@@ -673,23 +646,23 @@
   }
   function commitPitch() {
     if (!state.match || Object.keys(state.pins).length < 4) return;
-    var f = frameOf(vid.currentTime), out = {}, i;
+    var out = {}, i;
     for (i in state.pins) {
       if (!Object.prototype.hasOwnProperty.call(state.pins, i)) continue;
-      out[i] = [round4(state.pins[i][0]), round4(state.pins[i][1])];
+      out[i] = [r4(state.pins[i][0]), r4(state.pins[i][1])];
     }
-    bag().kp[f] = out;
+    bag().kp[frameOf(vid.currentTime)] = out;
     save();
     jumpPitch();
   }
 
   // Ball tagging works in bursts of consecutive samples: consecutive frames
-  // are what a detector learns motion from, and labelling them in a run also
-  // shows how far the ball travels between samples.
+  // are what a detector learns motion from. Pitch tagging wants the
+  // opposite — a different camera angle every frame, spread over the match.
   function jumpBall() {
     var dur = vid.duration || 0;
     state.burstLeft = BURST; state.last = null; state.pending = null;
-    if (!dur) return;
+    if (!dur) { draw(); return; }
     var b = bag().ball;
     for (var i = 0; i < 40; i++) {
       var t = 60 + Math.random() * Math.max(1, dur - 120 - BURST * SAMPLE_STEP);
@@ -697,8 +670,6 @@
     }
     seekTo(60 + Math.random() * Math.max(1, dur - 120));
   }
-  // Pitch tagging wants variety instead: every frame a different camera
-  // angle, spread over the whole match.
   function jumpPitch() {
     var dur = vid.duration || 0;
     state.pins = {}; state.armed = null; state.pred = null;
@@ -712,11 +683,9 @@
     seekTo(30 + Math.random() * Math.max(1, dur - 60));
   }
 
-  $("btnNext").addEventListener("click", function () { if (state.pending) commitBall(true); });
+  $("btnNext").addEventListener("click", function () { commitBall(true); });
   $("btnNoBall").addEventListener("click", function () { commitBall(false); });
-  $("btnBack").addEventListener("click", function () {
-    state.pending = null; setZoom(false); seekTo(vid.currentTime - SAMPLE_STEP);
-  });
+  $("btnBack").addEventListener("click", function () { state.pending = null; setZoom(false); seekTo(vid.currentTime - SAMPLE_STEP); });
   $("btnSavePitch").addEventListener("click", commitPitch);
   $("btnSkipFrame").addEventListener("click", jumpPitch);
   $("btnUndoPin").addEventListener("click", function () {
@@ -724,10 +693,6 @@
     if (!ks.length) return;
     delete state.pins[ks[ks.length - 1]];
     recomputePred(); draw();
-  });
-  $("btnZoom").addEventListener("click", function () {
-    var c = state.pending ? [state.pending.x, state.pending.y] : [0.5, 0.5];
-    setZoom(!state.zoom, c[0], c[1]);
   });
   $("modeBall").addEventListener("click", function () { setMode("ball"); });
   $("modePitch").addEventListener("click", function () { setMode("pitch"); });
@@ -737,10 +702,9 @@
     state.pending = null; state.last = null;
     state.pins = {}; state.armed = null; state.pred = null;
     setZoom(false);
-    if (state.match) { if (m === "ball") jumpBall(); else jumpPitch(); }
+    if (m === "ball") jumpBall(); else jumpPitch();
     draw();
   }
-
   seek.addEventListener("input", function () {
     var dur = vid.duration || 0;
     if (!dur) return;
@@ -749,212 +713,261 @@
     setZoom(false);
     seekTo((Number(seek.value) / 1000) * dur);
   });
-
   document.addEventListener("keydown", function (e) {
-    if (sheet.hidden === false) { if (e.key === "Escape") closeSheet(); return; }
-    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-    if (e.key === " ") {
-      e.preventDefault();
-      if (state.mode === "ball") { if (state.pending) commitBall(true); } else commitPitch();
-    } else if (e.key === "n" || e.key === "N") {
-      if (state.mode === "ball" && state.match) { e.preventDefault(); commitBall(false); }
-    } else if (e.key === "ArrowLeft") {
-      if (state.mode === "ball") { e.preventDefault(); $("btnBack").click(); }
-    } else if (e.key === "z" || e.key === "Z") {
-      $("btnZoom").click();
-    }
+    if (!sheet.hidden) { if (e.key === "Escape") closeSheet(); return; }
+    if (!document.body.classList.contains("working")) return;
+    if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if (e.key === " ") { e.preventDefault(); if (state.mode === "ball") commitBall(true); else commitPitch(); }
+    else if (e.key === "n" || e.key === "N") { if (state.mode === "ball") { e.preventDefault(); commitBall(false); } }
+    else if (e.key === "ArrowLeft") { if (state.mode === "ball") { e.preventDefault(); $("btnBack").click(); } }
+    else if (e.key === "z" || e.key === "Z") { setZoom(!state.zoom, state.pending ? state.pending.x : .5, state.pending ? state.pending.y : .5); }
   });
 
-  /* ---------- loading a match ---------- */
-  function openMatch(m) {
-    state.match = m;
-    state.pending = null; state.last = null; state.burstLeft = BURST;
-    state.pins = {}; state.armed = null; state.pred = null;
-    setZoom(false);
-    var stale = stagewrap.querySelector(".blocked");
-    if (stale) stale.remove();
-    vid.src = m.url;
-    seek.disabled = false;
-    hint.textContent = "Loading video…"; hint.hidden = false;
-    vid.addEventListener("loadedmetadata", function onMeta() {
-      vid.removeEventListener("loadedmetadata", onMeta);
-      if (vid.videoWidth && vid.videoHeight) vid.style.aspectRatio = vid.videoWidth + " / " + vid.videoHeight;
-      if (state.mode === "ball") jumpBall(); else jumpPitch();
-      draw();
-    });
-    vid.addEventListener("error", function onErr() {
-      vid.removeEventListener("error", onErr);
-      showBlocked();
-    });
-    closeSheet();
-    draw();
-  }
-
-  /* ---------- when the video will not load ---------- */
-  // Some hosts refuse to fetch media from another site. A Claude artifact is
-  // one: its content policy allows scripts and fonts from a short list and
-  // blocks everything else, video included, so this page cannot play a Veo
-  // file there however correct the link is. Served from GitHub Pages, or
-  // opened as a local file, the same page works.
-  function embedded() {
-    try { return window.self !== window.top; } catch (e) { return true; }
-  }
-  function showBlocked() {
-    hint.hidden = true;
-    var box = el("div", "blocked");
-    var h = el("h3", null, embedded() ? "This page cannot play video here" : "That video would not load");
-    h.style.color = "var(--chalk)"; h.style.fontSize = "15px";
-    h.style.textTransform = "none"; h.style.letterSpacing = "0";
-    box.appendChild(h);
-    var p = el("p");
-    p.style.margin = "0";
-    p.innerHTML = embedded()
-      ? "The page it is embedded in only allows video from its own list of sites, and Veo is not on it. "
-        + "Nothing is wrong with the link. Host this page yourself and it plays: <b>web/README.md</b> in the "
-        + "Sports-Camera-Analytics repository has the steps, and it is about five taps on github.com."
-      : "Check the link in the menu. A Veo <b>match page</b> address will not work — the page needs the "
-        + "direct video file, ending in <b>.mp4</b>.";
-    box.appendChild(p);
-    var b = el("button", "btn", "Open the menu");
-    b.addEventListener("click", openSheet);
-    box.appendChild(b);
-    stagewrap.appendChild(box);
-  }
-
-  /* ---------- menu ---------- */
-  function closeSheet() { sheet.hidden = true; sheetCard.innerHTML = ""; }
-  sheet.addEventListener("pointerdown", function (e) { if (e.target === sheet) closeSheet(); });
-  $("openMenu").addEventListener("click", openSheet);
-
+  /* ---------- screens ---------- */
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
     if (text != null) n.textContent = text;
     return n;
   }
+  function goHome() {
+    document.body.classList.remove("working");
+    vid.pause();
+    vid.removeAttribute("src");
+    vid.load();
+    state.match = null;
+    renderStart();
+  }
+  $("btnBackHome").addEventListener("click", goHome);
 
-  function openSheet() {
-    sheetCard.innerHTML = "";
-    sheet.hidden = false;
-
-    var head = el("div", "sheetrow");
-    head.style.alignItems = "center";
-    var h = el("h2", null, "Sideline Tagger");
-    h.style.flex = "1";
-    head.appendChild(h);
-    var close = el("button", "iconbtn", "Close");
-    close.addEventListener("click", closeSheet);
-    head.appendChild(close);
-    sheetCard.appendChild(head);
-
-    var mode = el("div", "modeflag");
-    mode.appendChild(el("i"));
-    mode.appendChild(el("span", null, "Saved on this device. Copy the tags out below when you are done."));
-    sheetCard.appendChild(mode);
-
-    sheetCard.appendChild(el("h3", null, "Match"));
-    var list = el("div", "matchlist");
+  // Some hosts refuse to fetch media from another site. A Claude artifact is
+  // one: its content policy allows scripts and fonts from a short list and
+  // blocks everything else, video included. Better to say so on the way in
+  // than to let someone pick a match and land on a black rectangle.
+  function embedded() {
+    try { return window.self !== window.top; } catch (e) { return true; }
+  }
+  function renderStart() {
+    var warn = $("startWarn");
+    warn.innerHTML = "";
+    if (embedded()) {
+      var w = el("div", "warn");
+      w.appendChild(el("div", "wtitle", "Video will not play here"));
+      var p = el("div");
+      p.innerHTML = "This page is embedded, and the page around it only allows video from its own "
+        + "list of sites. Veo is not on that list, so the footage cannot load — the links are fine. "
+        + "Open it from <b>GitHub Pages</b> instead and everything works.";
+      w.appendChild(p);
+      var a = el("div");
+      a.style.fontFamily = "var(--mono)";
+      a.style.fontSize = "11.5px";
+      a.style.wordBreak = "break-all";
+      a.style.color = "var(--muted)";
+      a.textContent = PAGES_URL;
+      w.appendChild(a);
+      warn.appendChild(w);
+    }
+    var list = $("matchList");
+    list.innerHTML = "";
     MATCHES.forEach(function (m) {
       var t = tally(m.id);
       var b = el("button", "matchbtn");
-      b.appendChild(el("span", "n", m.name + (state.match && state.match.id === m.id ? "  ·  open" : "")));
-      b.appendChild(el("span", "d", m.note + " · " + t.seen + " ball · " + t.kpFrames + " pitch"));
+      b.appendChild(el("span", "n", m.name));
+      b.appendChild(el("span", "d", m.note));
+      var tagged = t.seen + t.kpFrames;
+      b.appendChild(el("span", "tags" + (tagged ? "" : " none"),
+        tagged ? t.seen + " ball · " + t.kpFrames + " pitch tagged" : "nothing tagged yet"));
       b.addEventListener("click", function () { openMatch(m); });
       list.appendChild(b);
     });
-    sheetCard.appendChild(list);
+  }
 
-    var f = el("div", "field");
-    f.appendChild(el("label", null, "Or a direct video link (…veocdn.com/…/video.mp4)"));
-    var input = el("input");
-    input.type = "text"; input.id = "customUrl";
-    input.placeholder = "https://c.veocdn.com/…/video.mp4";
-    f.appendChild(input);
-    var go = el("button", "btn", "Open this link");
-    go.addEventListener("click", function () {
-      var u = input.value.trim();
-      if (!u) return;
-      openMatch({ id: "custom-" + u.slice(-40), name: "Custom", note: u, url: u, fps: 29.97 });
+  function openMatch(m) {
+    state.match = m;
+    state.pending = null; state.last = null; state.burstLeft = BURST;
+    state.pins = {}; state.armed = null; state.pred = null;
+    document.body.classList.add("working");
+    setZoom(false);
+    clearStageMsg();
+    vid.src = m.url;
+    stageMsg("Loading the match…", "The first frames take a moment to arrive.");
+    vid.addEventListener("loadedmetadata", function onMeta() {
+      vid.removeEventListener("loadedmetadata", onMeta);
+      clearStageMsg();
+      if (vid.videoWidth && vid.videoHeight) vid.style.aspectRatio = vid.videoWidth + " / " + vid.videoHeight;
+      if (state.mode === "ball") jumpBall(); else jumpPitch();
+      draw();
     });
-    f.appendChild(go);
-    sheetCard.appendChild(f);
+    vid.addEventListener("error", function onErr() {
+      vid.removeEventListener("error", onErr);
+      if (embedded()) {
+        stageMsg("Video will not play here",
+          "The page around this one blocks video from other sites. Nothing is wrong with the link. "
+          + "Open the tagger from GitHub Pages and it plays.", PAGES_URL);
+      } else {
+        stageMsg("That video would not load",
+          "A Veo match page address will not work — this needs the direct video file, ending in .mp4.");
+      }
+    });
+    draw();
+  }
+  function clearStageMsg() {
+    var old = stagewrap.querySelector(".stagemsg");
+    if (old) old.remove();
+  }
+  function stageMsg(title, body, mono) {
+    clearStageMsg();
+    hint.hidden = true;
+    var box = el("div", "stagemsg");
+    box.appendChild(el("h3", null, title));
+    var p = el("div");
+    p.innerHTML = body;
+    box.appendChild(p);
+    if (mono) {
+      var a = el("div", null, mono);
+      a.style.fontFamily = "var(--mono)"; a.style.fontSize = "11.5px";
+      a.style.wordBreak = "break-all"; a.style.color = "var(--sky)";
+      box.appendChild(a);
+    }
+    var back = el("button", "btn", "Back to matches");
+    back.addEventListener("click", goHome);
+    box.appendChild(back);
+    stagewrap.appendChild(box);
+  }
 
-    var note = el("p", "note");
-    note.innerHTML = "A Veo <b>match page</b> link will not work here — the page needs the direct video file. "
-      + "Send Claude the match link and it will be added to the list above.";
-    sheetCard.appendChild(note);
+  /* ---------- sheets ---------- */
+  function closeSheet() { sheet.hidden = true; sheetCard.innerHTML = ""; }
+  sheet.addEventListener("pointerdown", function (e) { if (e.target === sheet) closeSheet(); });
+  function openSheet(build) {
+    sheetCard.innerHTML = "";
+    sheetCard.appendChild(el("div", "grab"));
+    build(sheetCard);
+    var done = el("button", "btn", "Done");
+    done.addEventListener("click", closeSheet);
+    sheetCard.appendChild(done);
+    sheet.hidden = false;
+  }
 
-    if (state.match) {
-      sheetCard.appendChild(el("h3", null, "This match"));
-      var t2 = tally(state.match.id);
-      [["Ball frames tagged", t2.seen], ["…with the ball visible", t2.vis],
-       ["Pitch frames tagged", t2.kpFrames], ["…points placed", t2.kpPoints]]
-        .forEach(function (row) {
+  $("btnMore").addEventListener("click", function () {
+    openSheet(function (card) {
+      card.appendChild(el("h2", null, state.match ? state.match.name : "This match"));
+      if (state.match) {
+        var t = tally(state.match.id);
+        [["Ball frames tagged", t.seen], ["…with the ball visible", t.vis],
+         ["Pitch frames tagged", t.kpFrames], ["…points placed", t.kpPoints]].forEach(function (row) {
           var s = el("div", "stat");
           s.appendChild(el("span", null, row[0]));
           s.appendChild(el("span", null, String(row[1])));
-          sheetCard.appendChild(s);
+          card.appendChild(s);
         });
-    }
+      }
+      var z = el("button", "btn", state.zoom ? "Zoom is on" : "Zoom in for precision");
+      z.setAttribute("aria-pressed", String(state.zoom));
+      z.addEventListener("click", function () {
+        setZoom(!state.zoom, state.pending ? state.pending.x : .5, state.pending ? state.pending.y : .5);
+        closeSheet();
+      });
+      card.appendChild(z);
+      var ex = el("button", "btn", "Copy tags out");
+      ex.addEventListener("click", function () { openExport(); });
+      card.appendChild(ex);
+      var home = el("button", "btn", "Back to matches");
+      home.addEventListener("click", function () { closeSheet(); goHome(); });
+      card.appendChild(home);
+    });
+  });
 
-    sheetCard.appendChild(el("h3", null, "Tags"));
-    var out = el("textarea");
-    out.id = "exportBox"; out.readOnly = true;
-    out.value = JSON.stringify({ version: 2, sampleStep: SAMPLE_STEP, pitchVertices: V.length, matches: state.labels }, null, 1);
-    sheetCard.appendChild(out);
-
-    var row = el("div", "sheetrow");
-    var copy = el("button", "btn primary", "Copy tags");
-    copy.addEventListener("click", function () {
-      out.select();
-      var ok = false;
-      try { ok = document.execCommand("copy"); } catch (e2) { ok = false; }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(out.value).then(function () {
-          copy.textContent = "Copied";
-          setTimeout(function () { copy.textContent = "Copy tags"; }, 1400);
-        }, function () {
-          copy.textContent = ok ? "Copied" : "Select and copy";
-          setTimeout(function () { copy.textContent = "Copy tags"; }, 1800);
+  function openExport() {
+    openSheet(function (card) {
+      card.appendChild(el("h2", null, "Copy tags out"));
+      var n = el("p", "note");
+      n.innerHTML = "Tags live in this browser on this device. Paste this JSON where the pipeline can "
+        + "read it, then <b>build_dataset.py</b> cuts the frames and writes the training set.";
+      card.appendChild(n);
+      var out = el("textarea");
+      out.readOnly = true;
+      out.value = JSON.stringify({ version: 2, sampleStep: SAMPLE_STEP, pitchVertices: V.length, matches: state.labels }, null, 1);
+      card.appendChild(out);
+      var copy = el("button", "btn primary", "Copy to clipboard");
+      copy.addEventListener("click", function () {
+        out.select();
+        var ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(out.value).then(function () {
+            copy.textContent = "Copied";
+            setTimeout(function () { copy.textContent = "Copy to clipboard"; }, 1500);
+          }, function () { copy.textContent = ok ? "Copied" : "Select the text and copy"; });
+        } else copy.textContent = ok ? "Copied" : "Select the text and copy";
+      });
+      card.appendChild(copy);
+      if (state.match) {
+        var clear = el("button", "btn", "Clear this match's tags");
+        clear.addEventListener("click", function () {
+          if (clear.dataset.armed !== "1") {
+            clear.dataset.armed = "1"; clear.textContent = "Tap again to clear";
+            setTimeout(function () { clear.dataset.armed = "0"; clear.textContent = "Clear this match's tags"; }, 3000);
+            return;
+          }
+          delete state.labels[state.match.id];
+          save(); closeSheet(); renderStart(); draw();
         });
-      } else {
-        copy.textContent = ok ? "Copied" : "Select and copy";
-        setTimeout(function () { copy.textContent = "Copy tags"; }, 1800);
+        card.appendChild(clear);
       }
     });
-    row.appendChild(copy);
-    var clear = el("button", "btn", "Clear this match");
-    clear.addEventListener("click", function () {
-      if (!state.match) return;
-      if (clear.dataset.armed !== "1") {
-        clear.dataset.armed = "1"; clear.textContent = "Tap again to clear";
-        setTimeout(function () { clear.dataset.armed = "0"; clear.textContent = "Clear this match"; }, 3000);
-        return;
-      }
-      delete state.labels[state.match.id];
-      save(); openSheet();
-    });
-    row.appendChild(clear);
-    sheetCard.appendChild(row);
-
-    var n1 = el("p", "note");
-    n1.innerHTML = "<b>Ball.</b> Twenty frames in a row, a fifth of a second apart, then it jumps elsewhere. "
-      + "Tap the ball and the frame zooms so you can check it. If the ball is off screen or hidden, "
-      + "<b>Not visible</b> — those count just as much, and they are what stop the detector firing on a corner flag.";
-    sheetCard.appendChild(n1);
-    var n2 = el("p", "note");
-    n2.innerHTML = "<b>Pitch.</b> Tap a point on the little pitch, then tap it on the video. After four points "
-      + "the rest appear as dashed rings where they must be — tap one to accept it. Four is the minimum to save; "
-      + "eight or more is better. Skip any frame where you cannot see four.";
-    sheetCard.appendChild(n2);
   }
+
+  $("linkExport").addEventListener("click", openExport);
+  $("linkCustom").addEventListener("click", function () {
+    openSheet(function (card) {
+      card.appendChild(el("h2", null, "Open a direct video link"));
+      var n = el("p", "note");
+      n.innerHTML = "A Veo <b>match page</b> address will not work — this needs the direct video file, "
+        + "ending in <b>.mp4</b>. Send Claude a match link and it gets added to the list.";
+      card.appendChild(n);
+      var f = el("div", "field");
+      var input = el("input");
+      input.type = "text";
+      input.placeholder = "https://c.veocdn.com/…/video.mp4";
+      f.appendChild(input);
+      card.appendChild(f);
+      var go = el("button", "btn primary", "Open it");
+      go.addEventListener("click", function () {
+        var u = input.value.trim();
+        if (!u) return;
+        closeSheet();
+        openMatch({ id: "custom-" + u.slice(-40), name: "Custom video", note: u, url: u, fps: 29.97 });
+      });
+      card.appendChild(go);
+    });
+  });
+  $("linkHelp").addEventListener("click", function () {
+    openSheet(function (card) {
+      card.appendChild(el("h2", null, "How the tagging works"));
+      var a = el("p", "note");
+      a.innerHTML = "<b>Ball.</b> Twenty frames in a row, a fifth of a second apart, then it jumps "
+        + "elsewhere in the match. Tap the ball; the frame zooms so you can check it. When the ball is "
+        + "off screen or hidden, press <b>Not visible</b> — those count just as much, and they are what "
+        + "stop the detector firing on a corner flag.";
+      card.appendChild(a);
+      var b = el("p", "note");
+      b.innerHTML = "<b>Pitch.</b> Tap a point on the little pitch, then tap that same point on the "
+        + "video. After four, the rest appear as dashed rings where they must be — tap one to accept it. "
+        + "Four is the minimum to save, eight is better. Skip any frame without four visible.";
+      card.appendChild(b);
+      var c = el("p", "note");
+      c.innerHTML = "Tagging the worn 19 Sept field matters more than the green one: the ball is found "
+        + "43% of the time there against 73% on grass that looks like everything these models were "
+        + "trained on.";
+      card.appendChild(c);
+    });
+  });
 
   /* ---------- go ---------- */
   load();
   buildDiagram();
+  renderStart();
   vid.addEventListener("timeupdate", syncScrub);
   vid.addEventListener("durationchange", syncScrub);
-  draw();
-  openSheet();
 })();
 </script>
