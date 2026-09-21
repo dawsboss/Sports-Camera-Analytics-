@@ -51,25 +51,37 @@ epsilon it needs, without which it predicts nothing.
 | | Result on real frames |
 | --- | --- |
 | Players, off-the-shelf detector (COCO, small model, 1280 px) | 19 to 32 per frame, 55 to 65 px tall, including spectators and coaches on the sideline |
-| Ball, largest COCO model at 1920 px, consecutive samples at 5 fps | **varies hugely by passage of play**: one burst 12 of 12 with no gap, another 7 of 12 with gaps of 2 and 3 samples, another 8 of 40 with gaps of 13 and 15 |
-| Ball, a fine-tuned soccer-ball model from Hugging Face | 3 frames of 12, at 0.2 to 0.3 confidence, with boxes 33 to 59 px wide where the ball is 15 to 35 px: not the ball |
+| Ball, largest COCO model at 1920 px, 240 consecutive samples at 5 fps | 19 Sept (worn olive field) **43%**, median gap 2 samples, worst 15 (3.0 s). 20 Sept (green school field) **73%**, median gap 1, worst 8 (1.6 s). Ball measures 11 px across on both, range 6-39 |
+| Ball, a fine-tuned soccer-ball model from Hugging Face | 3 frames of 12, boxes 33 to 59 px wide where the ball is 11: not the ball |
 
 Players are solved off the shelf.
 
-**The ball needs measuring over consecutive frames, not scattered ones,
-and the first attempt here got that wrong.** Frames sampled minutes apart
-said "1 of 8" and meant nothing: what matters is whether a tracker can
-carry the ball across the samples where detection misses, and only
-neighbouring samples answer that. Measured properly with
-`spike/evals/ball_recall.py`, the off-the-shelf model is far better than
-that first number suggested and wildly uneven — some passages every
-sample, others three-second blackouts. A gap of one or two samples is
-bridged by any tracker; a gap of fifteen is three seconds, in which the
-ball crosses half a pitch, and nothing may be drawn across it.
+**The ball has to be measured over consecutive frames, and the first
+attempt here got that wrong.** Frames sampled minutes apart said "1 of 8"
+and meant nothing: the question is whether a tracker can carry the ball
+across the samples where detection misses, and only neighbouring samples
+answer it. Measured properly with `spike/evals/ball_recall.py`, over
+sixteen bursts on the two matches:
 
-So the question is not "does the ball get detected" but "how much of the
-match is in the good regime", and closing the bad stretches is what
-fine-tuning is for.
+- **The median gap is one to two samples on both matches.** That is
+  bridged by any tracker. Most of the time, the ball is effectively
+  tracked.
+- **The tail is the problem.** Occasional runs of 8 to 15 samples, which
+  is 1.6 to 3 seconds, in which the ball crosses half a pitch. Nothing
+  may be drawn across those, and they are what fine-tuning has to close.
+- **Field condition dominates, not camera or distance.** The green
+  school field gives 73%; the worn olive field, same camera and same
+  model, gives 43%. A white ball on green grass is a contrast the model
+  already knows; a white ball on patchy brown turf is not. So the worn
+  footage is the *valuable* footage to tag, and a model tuned only on
+  easy matches will disappoint on exactly the ones that need help.
+- **The ball is 11 px across.** That is small enough to explain the
+  misses without anything being wrong, and it sets the box size the
+  training set uses (`build_dataset.py` writes 22 px, which the
+  measurement confirms rather than guesses).
+
+So the target is not "lift the average". It is "close the blackouts on
+worn-turf footage", and that is a narrow, checkable goal.
 
 ## What each thing you asked for needs
 

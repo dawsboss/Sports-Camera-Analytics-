@@ -123,10 +123,14 @@ is built. M3 onward is not started.
   dimensions of each field, which are not 105 x 68 and have not been
   measured. One match's fix is not to be trusted until it holds on the
   others; the spec's third, held-out match does not exist yet.
-- **The ball is not detected** on this footage by any model tried (COCO
-  at any size, a fine-tuned soccer-ball model). Players are. Possession,
-  passes and restarts all wait on a ball detector trained on this
-  footage; `docs/NEXT.md` puts it first.
+- **The ball is detected more often than an early measurement here
+  claimed, and unevenly.** Over 240 consecutive samples per match with a
+  COCO model: 43% on the worn olive field, 73% on the green one, median
+  gap one to two samples (bridgeable), worst 15 (not). Measure with
+  `spike/evals/ball_recall.py` over *bursts*; scattered frames cannot
+  answer whether a tracker bridges the misses, and the first attempt here
+  made exactly that mistake. Fine-tuning's job is the blackout tail on
+  worn turf, not the average. The ball is 11 px across.
 - **Pitch dimensions are assumed, not known.** The search runs with
   105 x 68 and both real pitches are smaller. The upload carries them;
   nobody has measured either field.
