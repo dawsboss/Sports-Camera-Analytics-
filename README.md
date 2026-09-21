@@ -15,9 +15,10 @@ tracks. Raw video never leaves the homelab.
 
 | Milestone | State |
 | --- | --- |
-| M1 registration spike | **Run on a real Veo export and failing: 0% of frames registered against the 70% gate.** Root cause found and written up in [`spike/evals/`](spike/evals/); a first fix attempt was tried, made things worse on real footage in a different way, and was reverted rather than shipped half-working. Fixing the line-finding this depends on is the actual next work. |
-| M2 skeleton | API, Postgres, MinIO, RQ worker, S0 ingest and S1 sampling. Runs with no services on a laptop, or under `docker compose`. Not worth building on top of until M1 passes. |
-| M3 onward | Not started. |
+| M1 registration spike | **Run on two real Veo exports. The classical detector fails the gate on both** after every improvement that could be measured (per-frame grass colour, line thresholds that follow it, plausibility checks compared three ways on four datasets). A pretrained line network, unmodified, already finds on the worn field what the classical code cannot; fine-tuning it on this footage is the next registrar. The measurements are in [`spike/evals/`](spike/evals/) and the plan in [`docs/NEXT.md`](docs/NEXT.md). |
+| M2 skeleton | API, Postgres, MinIO, RQ worker, S0 ingest and S1 sampling. Runs with no services on a laptop, or under `docker compose`. |
+| M3 detection | Feasibility measured: players are found off the shelf, the ball is not, by any model tried. A ball detector trained on this footage is the gate for possession, passes and restarts. Not built. |
+| M4 onward | Not started. |
 
 ## Run the M1 spike
 

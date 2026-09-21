@@ -49,7 +49,10 @@ def test_a_view_with_one_crossing_line_is_reported_not_guessed():
     # correspondences, so the honest answer is "unregistered", with a reason.
     frame = render_pitch_frame(PITCH, sideline_camera(PITCH, 0, 0, 1.0), players=4, seed=2)
     r = REG.register(frame)
-    assert not r.registered and r.mapping is None and r.reason
+    # Refused, with a reason, and nothing downstream can mistake it for a
+    # fit: the artifact row carries no homography. Whether a rejected
+    # candidate mapping is kept for the spike's overlays is not the contract.
+    assert not r.registered and r.reason and r.as_row()["h"] is None
 
 
 def test_grass_only_is_unregistrable():

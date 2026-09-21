@@ -58,6 +58,19 @@ class FollowCamConfig:
     # without this the right-hand box seen from here is indistinguishable
     # from the left-hand box seen from the far side.
     camera_side: int = -1
+    # Which evidence the plausibility checks use for "in front of the camera"
+    # and "the camera points at the pitch". "mask": the grass mask's hull and
+    # centroid, right where grass is the pitch (a stadium) and wrong on an
+    # open school field where the mask reaches the tree line. "frame": the
+    # frame centre only, which assumes nothing about the mask and lets
+    # confident wrong fits through on stadium footage. "hybrid": the frame
+    # centre, plus the hull of the lower half of the mask, which on every
+    # footage seen so far is pitch. spike/evals/bench.py compares them; on
+    # 100 broadcast frames "mask" gave 23 right and 9 wrong, "hybrid" 22 and
+    # 18, "frame" 19 and 36, and on the two Veo exports the extra frames
+    # the looser modes accepted were wrong (frame-centre jumps of 50-150 m/s
+    # between frames 200 ms apart). "mask" is the honest baseline.
+    plausibility: str = "mask"
     tau_px: float = 8.0              # how far a projected line may sit from paint and still count
     tau_m: float = 1.5               # how far paint may sit from a surface line, in metres
     model_step_m: float = 1.0
@@ -82,6 +95,7 @@ class _FrameContext:
     grass: np.ndarray         # uint8 mask of the playing surface
     dt: np.ndarray            # distance from every pixel to the nearest painted pixel
     hull: np.ndarray          # (K, 2) convex hull of the eroded grass
+    hull_low: np.ndarray      # the same, of the lower half of the frame only
     centroid: np.ndarray      # (2,)
     det_samples: np.ndarray   # (S, 2) image points along the detected lines
 
@@ -190,6 +204,8 @@ class FollowCamRegistrar:
         if len(pts) > 20000:
             pts = pts[np.random.default_rng(0).choice(len(pts), 20000, replace=False)]
         hull = cv2.convexHull(pts).reshape(-1, 2).astype(np.float64)
+        low = pts[pts[:, 1] >= Hh * 0.5]
+        hull_low = cv2.convexHull(low).reshape(-1, 2).astype(np.float64) if len(low) >= 3 else hull
         centroid = pts.mean(axis=0).astype(np.float64)
         dt = cv2.distanceTransform((det.line_pixels == 0).astype(np.uint8), cv2.DIST_L2, 3)
         # A merged line is as long as its farthest fragments but only as
@@ -204,7 +220,7 @@ class FollowCamRegistrar:
         samples = np.concatenate(samples)
         if len(samples) > cfg.max_detected_samples:
             samples = samples[np.linspace(0, len(samples) - 1, cfg.max_detected_samples).astype(int)]
-        return _FrameContext((W, Hh), det.grass, dt, hull, centroid, samples)
+        return _FrameContext((W, Hh), det.grass, dt, hull, hull_low, centroid, samples)
 
     # -- hypothesis search ---------------------------------------------------
 
@@ -258,60 +274,106 @@ class FollowCamRegistrar:
     def _sane(self, H: np.ndarray, ctx: _FrameContext) -> np.ndarray:
         """Which surface->image homographies a camera above the pitch could
         have produced, judged on the grass the frame actually shows."""
+        checks = self._sane_checks(H, ctx)
+        ok = np.ones(len(H), dtype=bool)
+        for v in checks.values():
+            ok &= v
+        return ok
+
+    def _sane_checks(self, H: np.ndarray, ctx: _FrameContext) -> dict[str, np.ndarray]:
+        """Every plausibility check as its own boolean array, in the order
+        they are applied, so a frame that fails can say which one refused
+        it. The expensive pitch-on-grass check runs only where the cheap
+        ones passed and reads as passed elsewhere, so the first failing
+        check in this order is the one to blame."""
         cfg = self.cfg
         L, W = self.surface.length / 2 + cfg.pitch_margin_m, self.surface.width / 2 + cfg.pitch_margin_m
-        ok = np.isfinite(H).all(axis=(1, 2))
-        safe = np.where(ok[:, None, None], H, np.eye(3))
-        det = np.linalg.det(safe)
-        ok &= np.abs(det) > 1e-12
-        safe = np.where(ok[:, None, None], safe, np.eye(3))
+        fw, fh = ctx.size
+        finite = np.isfinite(H).all(axis=(1, 2))
+        safe = np.where(finite[:, None, None], H, np.eye(3))
+        invertible = finite & (np.abs(np.linalg.det(safe)) > 1e-12)
+        safe = np.where(invertible[:, None, None], safe, np.eye(3))
         Hi = np.linalg.inv(safe)
+        if cfg.plausibility == "mask":
+            c, hull = ctx.centroid, ctx.hull
+        elif cfg.plausibility == "hybrid":
+            c, hull = np.array([fw / 2.0, fh / 2.0]), ctx.hull_low
+        elif cfg.plausibility == "frame":
+            c, hull = np.array([fw / 2.0, fh / 2.0]), None
+        else:
+            raise ValueError(f"unknown plausibility mode {cfg.plausibility!r}")
         with np.errstate(divide="ignore", invalid="ignore"):
-            # The visible grass must all be in front of the camera: the
-            # horizon sits above it, so w keeps one sign across the hull.
-            ph = np.einsum("nij,kj->nki", Hi, homogeneous(ctx.hull))
-            w = ph[..., 2]
-            ok &= (w > 0).all(axis=1) | (w < 0).all(axis=1)
-            # At the middle of the grass: on the pitch, mirrored the way a
-            # camera above a right-handed surface mirrors into y-down pixels,
-            # and at a plausible scale.
-            c = ctx.centroid
+            # The probe point is where the camera points: the ball, for a
+            # follow-cam, and the pitch for a fixed camera. It must be in
+            # front of the camera and on the pitch (with room for a
+            # throw-in), mirrored the way a camera above a right-handed
+            # surface mirrors into y-down pixels, and at a plausible scale.
+            # The grass hull, where one is used, must be in front of the
+            # camera too: the horizon sits above the pitch.
             probe = homogeneous(np.array([c, c + [1.0, 0.0], c + [0.0, 1.0]]))
             pp = np.einsum("nij,kj->nki", Hi, probe)
             wp = pp[..., 2]
-            ok &= (np.abs(wp) > 1e-12).all(axis=1)
+            in_front = (wp > 1e-12).all(axis=1)
+            if hull is not None:
+                ph = np.einsum("nij,kj->nki", Hi, homogeneous(hull))
+                in_front &= (ph[..., 2] > 1e-12).all(axis=1)
             q = pp[..., :2] / wp[..., None]
         cen = q[:, 0]
-        ok &= (np.abs(cen[:, 0]) <= L) & (np.abs(cen[:, 1]) <= W)
+        centre_on_pitch = (np.abs(cen[:, 0]) <= L) & (np.abs(cen[:, 1]) <= W)
         jx, jy = q[:, 1] - q[:, 0], q[:, 2] - q[:, 0]
         detj = jx[:, 0] * jy[:, 1] - jx[:, 1] * jy[:, 0]
-        ok &= detj < 0
+        mirror = detj < 0
         # Down the image is toward the camera, so toward its own touchline.
-        ok &= jy[:, 1] * cfg.camera_side > 0
+        side = jy[:, 1] * cfg.camera_side > 0
         ppm = 1.0 / np.sqrt(np.abs(detj) + 1e-18)
-        ok &= (ppm >= cfg.px_per_m[0]) & (ppm <= cfg.px_per_m[1])
-        # Wherever the pitch itself lands in the frame, there must be grass.
-        # This is what rejects a naming that fits the lines it used but puts
-        # the far half of the pitch in the stands.
+        scale = (ppm >= cfg.px_per_m[0]) & (ppm <= cfg.px_per_m[1])
+        checks = {
+            "invertible": invertible, "in_front": in_front, "centre_on_pitch": centre_on_pitch,
+            "mirror": mirror, "camera_side": side, "scale": scale,
+        }
+        ok = np.ones(len(H), dtype=bool)
+        for v in checks.values():
+            ok &= v
+        # The horizon may not cross the pitch: every pitch point that lands
+        # in the frame must be in front of the camera. And wherever the pitch
+        # lands in the frame there must be grass, which is what rejects a
+        # naming that fits the lines it used but puts the far half of the
+        # pitch in the stands.
+        horizon = np.ones(len(H), dtype=bool)
+        pog = np.ones(len(H), dtype=bool)
         idx = np.flatnonzero(ok)
         for s in range(0, len(idx), cfg.chunk):
             sel = idx[s : s + cfg.chunk]
-            ok[sel] &= self._pitch_on_grass(H[sel], ctx) >= cfg.pitch_on_grass
-        return ok
+            clear, frac = self._pitch_in_view(H[sel], ctx)
+            horizon[sel] = clear
+            pog[sel] = frac >= cfg.pitch_on_grass
+        checks["horizon_clear"] = horizon
+        checks["pitch_on_grass"] = pog
+        return checks
 
-    def _pitch_on_grass(self, H: np.ndarray, ctx: _FrameContext) -> np.ndarray:
+    def _pitch_in_view(self, H: np.ndarray, ctx: _FrameContext) -> tuple[np.ndarray, np.ndarray]:
+        """For each hypothesis: whether every pitch point that lands in the
+        frame is in front of the camera, and what share of those lands on
+        grass. A point behind the camera still projects somewhere; if that
+        somewhere is inside the frame, the horizon crosses the pitch and no
+        real camera produced this fit."""
         W, Hh = ctx.size
         p = np.einsum("nij,kj->nki", H, homogeneous(self._pitch_grid))
         w = p[..., 2]
         with np.errstate(divide="ignore", invalid="ignore"):
             xy = p[..., :2] / w[..., None]
-        inview = (w > 1e-9) & np.isfinite(xy).all(axis=-1)
-        inview &= (xy[..., 0] >= 0) & (xy[..., 0] < W) & (xy[..., 1] >= 0) & (xy[..., 1] < Hh)
+        inframe = np.isfinite(xy).all(axis=-1)
+        inframe &= (xy[..., 0] >= 0) & (xy[..., 0] < W) & (xy[..., 1] >= 0) & (xy[..., 1] < Hh)
+        horizon_clear = ~(inframe & (w <= 1e-9)).any(axis=1)
+        inview = inframe & (w > 1e-9)
         xi = np.clip(np.round(np.nan_to_num(xy[..., 0])).astype(int), 0, W - 1)
         yi = np.clip(np.round(np.nan_to_num(xy[..., 1])).astype(int), 0, Hh - 1)
         on = (ctx.grass[yi, xi] > 0) & inview
         n = inview.sum(axis=1)
-        return np.where(n > 0, on.sum(axis=1) / np.maximum(n, 1), 0.0)
+        return horizon_clear, np.where(n > 0, on.sum(axis=1) / np.maximum(n, 1), 0.0)
+
+    def _pitch_on_grass(self, H: np.ndarray, ctx: _FrameContext) -> np.ndarray:
+        return self._pitch_in_view(H, ctx)[1]
 
     # -- scoring -------------------------------------------------------------
 

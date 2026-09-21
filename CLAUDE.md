@@ -7,12 +7,16 @@ no services. Publishes aggregates to Firebase under a `soccer-manager`
 fixture; that app stays a static site that consumes JSON.
 
 Read `docs/SPEC.md` before changing anything structural. It is a copy of
-the living design doc, and its milestone order is the work order: M1 has
-now been run on a real Veo export and **failed** (0% registered against
-the 70% gate — see `spike/evals/veo_match_2026-09-19.md`), M2 (the
-skeleton) is built, M3 onward is not started. M1 is not "done, move on" —
-it is failing, and fixing the line-finding it depends on is the actual
-next work, ahead of anything in M2 onward.
+the living design doc, and its milestone order is the work order. Then
+read `docs/NEXT.md`: it says what two real Veo exports, a labelled
+broadcast set and the synthetic views measured, what each requested
+output needs, and the order of the next work. In short: M1 (classical
+registration) fails the gate on real footage and the measurements say
+why; a pretrained line network already does better and is the next
+registrar after fine-tuning; players are detected off the shelf; the
+ball is found by no model tried, and a ball detector trained on this
+footage is the gate for everything possession-shaped. M2 (the skeleton)
+is built. M3 onward is not started.
 
 ## Required after every change
 
@@ -82,38 +86,50 @@ next work, ahead of anything in M2 onward.
 - `FollowCamRegistrar.keep_candidates = True` keeps every scored
   hypothesis of the last frame in `last_candidates`; compare against
   truth before guessing why a frame failed.
-- **On real footage, the bottleneck is line-finding, not the homography
-  search or its scoring.** Two independent real datasets (SoccerNet
-  broadcast frames, `spike/evals/README.md`; a real Veo export,
-  `spike/evals/veo_match_2026-09-19.md`) converge on the same bug:
-  `grass_mask()`'s hole-filling treats anything enclosed by the largest
-  green blob as grass, so a road, parked cars, or advertising boards get
-  swallowed in and the line detector finds "lines" on them. When real
-  pitch lines are found cleanly, the fit is still accurate to about a
-  metre, same as synthetic.
-- **A flank-based fix was tried and reverted — do not re-attempt it
-  without reading why first.** Requiring raw (unfilled) grass colour on
-  both sides of a candidate line broke two synthetic accuracy tests (a
-  real box-edge line can have another real pitch line close enough on one
-  flank to occupy the sample points) and, loosened to either side, still
-  let real false lines through — a hand-confirmed genuine line in the Veo
-  footage only reaches 75% raw-grass fraction on its best flank, which
-  overlaps the false lines' range. A fixed colour threshold tuned on
-  clean synthetic grass does not transfer to real turf's shadows, mowing
-  stripes and compression noise. The fix needs a per-frame-adaptive grass
-  colour model (sample the dominant colour inside the coarse grass region,
-  test flanks against that instead of a global threshold), not a stricter
-  version of the same fixed-threshold idea.
+- **Grass colour is estimated per frame** (`estimate_grass()` in
+  `lines.py`), and the paint thresholds are ratios of it. A worn pitch is
+  olive at hue 23; the old fixed range started at 30. The ratios are the
+  ones the original absolute thresholds had on rendered grass, on
+  purpose: a lower top-hat gained broadcast recall and lost a metre on
+  one rendered view, and the rendered view wins. Do not retune these
+  against one dataset; `spike/evals/bench.py` scores all four at once.
+- **Plausibility checks are reported one by one** (`_sane_checks()`), in
+  three modes (`FollowCamConfig.plausibility`, numbers in its comment).
+  Any rule that consults the grass mask assumes grass is the pitch, which
+  is true in a stadium and false on an open field; rules that do not
+  consult it let confident wrong fits through. Nothing in between was
+  found. The default is the precise mode.
+- **On real footage the classical detector's limit is not any one rule.**
+  Every scene brings something thin, bright and on grass that is not a
+  line: boards, a road, cars, a crowd, the goal net, the Veo watermark,
+  white kits. Two attempts to reject them with colour geometry were
+  measured and did not hold (`spike/evals/README.md`, both rounds). Do not
+  attempt a third; the way past this is a detector that labels pixels as
+  a named line, which learns what a line is not.
+- **SoccerNet's pretrained line network runs here** (`sn_baseline.py`) and
+  already finds on the worn field what the classical code cannot. It
+  needs its BatchNorm epsilon set to 1e-3 before loading; without that it
+  loads without complaint and predicts background everywhere. Its
+  mistakes on Veo footage are domain shift; fine-tuning on a few hundred
+  labelled frames of this footage is the next registrar, behind the same
+  `Registrar` interface, feeding the same hypothesis search.
 
 ## Known gaps
 
-- M1 has been run on one real Veo export and failed (0% registered). It
-  needs to pass on the fixed three-match evaluation set the spec asks for
-  before anything downstream is worth building on top of it — the spec's
-  own words: "if a match takes an hour of clicking [or, here, doesn't
-  register at all], the honest response is to stop and build the camera
-  first rather than optimise the wrong pipeline." One match's fix should
-  not be trusted until it holds on the other two.
+- M1 with the classical detector fails the gate on both real Veo exports
+  (1 and 0 of 60 frames) after every measured improvement. The path past
+  it is the learned detector above, fine-tuned; that needs labelled
+  frames from this footage, which do not exist yet, and the real pitch
+  dimensions of each field, which are not 105 x 68 and have not been
+  measured. One match's fix is not to be trusted until it holds on the
+  others; the spec's third, held-out match does not exist yet.
+- **The ball is not detected** on this footage by any model tried (COCO
+  at any size, a fine-tuned soccer-ball model). Players are. Possession,
+  passes and restarts all wait on a ball detector trained on this
+  footage; `docs/NEXT.md` puts it first.
+- **Pitch dimensions are assumed, not known.** The search runs with
+  105 x 68 and both real pitches are smaller. The upload carries them;
+  nobody has measured either field.
 - No S2 onward: no detection, tracking, team assignment, identity, review,
   stats or publish. `contracts.py` already defines what they write.
 - Where `player_stats.json` sits under the fixture in soccer-manager's

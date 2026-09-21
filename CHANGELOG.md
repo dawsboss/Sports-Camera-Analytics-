@@ -42,3 +42,32 @@ will write.
   `frames.parquet` plus cached JPEGs; a FastAPI upload that takes the
   accompanying inputs and queues the stages; an RQ worker; an inline queue
   so all of it runs and is tested with no services; `docker-compose.yml`.
+
+## 0.1.2 — two real matches, the detector's limits, and the plan
+
+Both Veo exports run through the pipeline; what the footage says is in
+`docs/NEXT.md`, and the measurements behind it are in `spike/evals/`.
+
+- **Grass colour is estimated per frame** (`estimate_grass()`). The worn
+  19 Sept field is olive, not green, and a fixed hue range passed a tenth
+  of its pitch pixels. Broadcast registration went from 8 to 31 of 100
+  on that change alone, and the worn field's lines became findable.
+- **Line thresholds follow the frame's grass** as ratios, chosen to
+  reproduce the original absolute thresholds on rendered grass so the
+  synthetic views keep their precision (0.59 m worst case).
+- **Hole-filling in the grass mask is capped** so a road with cars, or a
+  crowd, enclosed by grass is no longer filled in as pitch.
+- **Plausibility checks are reported one by one** (`_sane_checks()`) and
+  come in three modes (`FollowCamConfig.plausibility`), measured on all
+  four datasets by `spike/evals/bench.py`. The default stays the precise
+  one; the looser ones register more frames and are wrong more.
+- **SoccerNet's pretrained line network runs here** (`sn_baseline.py`)
+  and finds on the worn field what the classical detector cannot. It is
+  the next registrar, after fine-tuning on this footage.
+- **Ball detection is the open problem for everything possession-shaped.**
+  Players are found off the shelf; the ball is found by no model tried,
+  COCO or fine-tuned. `docs/NEXT.md` puts a ball detector trained on this
+  footage first.
+- The midfield synthetic test now asserts the contract (refused, with a
+  reason, no homography in the artifact row) rather than an internal
+  detail; the view is still refused.

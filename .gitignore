@@ -13,3 +13,7 @@ spike/out/
 *.mov
 *.parquet
 .env
+# Model weights are downloaded, never committed.
+*.pt
+*.pth
+*.onnx

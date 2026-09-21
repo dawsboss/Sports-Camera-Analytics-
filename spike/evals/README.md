@@ -80,3 +80,60 @@ edge has grass on one side and stands, crowd, or another board on the
 other. This is a small, targeted change and worth trying before anything
 larger, because it matches the actual failure mode rather than a guess
 at one.
+
+## Second round: two Veo exports, a per-frame grass model, and a learned detector
+
+`veo_match_2026-09-19.md` is the first real M1 run (0%). This round used
+that match, a second export (20 Sept, a green multi-pitch school field),
+this broadcast set, and the synthetic views together, through
+`bench.py`, which scores one configuration on all four at once.
+
+What changed in the classical detector, and what each change measured:
+
+- **Per-frame grass colour** (`estimate_grass()`): the worn field is olive
+  at hue 23 and the fixed range started at 30, passing a tenth of the
+  pixels that were certainly pitch. With the estimate, line-finding works
+  on the worn field and this set went from 8 to 31 of 100 registered.
+- **Line thresholds as ratios of the frame's grass** rather than fixed
+  "white": needed on the worn field, where the paint is far from any
+  fixed white. Expressed as the ratios the original absolute thresholds
+  had on rendered grass (value 0.62, saturation 0.66, top-hat 25), the
+  synthetic views hold at 0.59 m worst case; a lower top-hat (18) gained
+  broadcast recall (23 right) and lost a metre on one rendered view, and
+  per this repo's rule the rendered view wins. That trade-off is real and
+  is written into `LineDetectionConfig`.
+- **Plausibility checks that consult the grass mask assume a stadium.**
+  `FollowCamRegistrar._sane_checks()` now reports each check separately;
+  on both Veo exports the hull-in-front check refused every one of the
+  best-scoring hypotheses, because on an open field the mask reaches the
+  tree line. Three modes were measured (`FollowCamConfig.plausibility`):
+
+  | mode | broadcast right / wrong | Veo 19 Sept (60) | Veo 20 Sept (60) | synthetic |
+  | --- | --- | --- | --- | --- |
+  | mask (default) | 23 / 9 | 0 | 0 | all pass |
+  | hybrid | 22 / 18 | 5, centre jumps ~50 m/s | 6 | all pass |
+  | frame | 19 / 36 | 23, jumps 146 m/s median | 8, jumps 168 m/s | midfield view wrongly registered |
+
+  A follow-cam pans smoothly, so a frame-centre jump of tens of metres per
+  second between frames 200 ms apart is a wrong registration. The looser
+  modes register more and are wrong more; nothing in between was found.
+
+Where that leaves the classical detector: better everywhere it can be
+measured, and still nowhere near the gate on real footage. The reason is
+not any one rule. Every scene brings something new that is thin, bright
+and on grass without being a line: boards here, a road and parked cars
+and a crowd on the 19th, a goal net, the Veo watermark, white kits. The
+composite `mask_53480.jpg` from that run shows the paint mask lit up on
+all of them.
+
+**A learned detector, unmodified, already does better.** SoccerNet's
+baseline (DeepLabV3-ResNet50, 28 line classes, published weights,
+`sn_baseline.py`) finds the correct lines on this set's frames and, on
+the worn Veo field, finds the near and far touchlines, the halfway line,
+the centre circle and the penalty-box region that the classical code
+never did. It also labels the road and the clouds, and calls the halfway
+line a side line: ordinary domain shift from broadcast to a school field.
+It needs its BatchNorm epsilon set to 1e-3 before loading, as its own
+loader does; without that it loads cleanly and predicts background
+everywhere, which cost an hour here. The plan from this point is in
+`docs/NEXT.md`.

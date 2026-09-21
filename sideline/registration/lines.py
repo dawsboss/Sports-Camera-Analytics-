@@ -17,14 +17,31 @@ import numpy as np
 
 @dataclass
 class LineDetectionConfig:
-    grass_hue: tuple[int, int] = (30, 95)     # OpenCV hue is 0..180; green sits near 60
-    grass_min_sat: int = 35
-    grass_min_val: int = 40
+    # What the playing surface looks like is estimated per frame (see
+    # GrassModel). These bound the estimate and are the fallback when a
+    # frame has too little surface in it to estimate from.
+    grass_hue: tuple[int, int] = (30, 95)     # fallback only; OpenCV hue is 0..180, green near 60
+    grass_min_sat: int = 35                    # fallback only
+    grass_min_val: int = 40                    # fallback only
+    grass_hue_prior: tuple[int, int] = (8, 100)   # olive-brown worn turf to blue-green
+    grass_prior_min_sat: int = 30
+    grass_prior_min_val: int = 30
+    grass_hue_tol: int = 12                    # half-width of the hue band around the estimated peak
+    grass_sv_percentiles: tuple[float, float] = (2.0, 99.5)   # of the pixels at that hue
+    grass_range_pad: int = 15                  # widening of the saturation and value ranges
+    grass_roi_top: float = 0.35                # estimate from the lower part of the frame, where the pitch is
+    grass_min_prior_px: int = 500
     grass_close_px: int = 25
+    grass_max_hole_frac: float = 0.02          # holes larger than this share of the frame are not filled
     tophat_px: int = 15                        # a little wider than the widest line
-    tophat_thresh: int = 25
-    line_min_val: int = 90
-    line_max_sat: int = 90
+    tophat_thresh: int = 25                    # local contrast of paint over the grass beside it
+    # Paint is less saturated than this frame's grass and not darker than
+    # most of it. These are the absolute thresholds the detector was first
+    # tuned with (s <= 90, v >= 90 on rendered grass at s 138, v 146),
+    # expressed as ratios so they follow the grass on a worn olive pitch at
+    # v 71. Additive offsets were tried and lost a metre on rendered views.
+    line_sat_ratio: float = 0.66
+    line_val_ratio: float = 0.62
     min_component_len: int = 25
     min_elongation: float = 3.0                # bbox diagonal^2 / area; blobs sit near 2.5
     hough_threshold: int = 50
@@ -73,19 +90,76 @@ class DetectedLine:
         return self.p0[None, :] + t[:, None] * (self.p1 - self.p0)[None, :]
 
 
+@dataclass(frozen=True)
+class GrassModel:
+    """What this frame's playing surface looks like, estimated from the frame.
+
+    A worn youth pitch in September is olive-brown, hue near 23 on OpenCV's
+    0..180 scale; a broadcast pitch is green, near 60; a rendered one is
+    exactly green. One fixed range cannot hold all three, and the first real
+    Veo export proved it: the fixed range passed a tenth of the pixels that
+    were certainly pitch, and everything downstream of the mask was working
+    from that tenth. The paint thresholds are relative to this too, because
+    a faded line on a worn pitch is only a little brighter than the grass
+    beside it and nowhere near any fixed idea of white.
+    """
+
+    hue: tuple[int, int]
+    sat: tuple[int, int]
+    val: tuple[int, int]
+    s_median: float
+    v_median: float
+    estimated: bool
+
+    def mask(self, hsv: np.ndarray) -> np.ndarray:
+        h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        m = (h >= self.hue[0]) & (h <= self.hue[1]) & (s >= self.sat[0]) & (s <= self.sat[1])
+        m &= (v >= self.val[0]) & (v <= self.val[1])
+        return m.astype(np.uint8) * 255
+
+
 @dataclass
 class LineDetection:
     grass: np.ndarray            # uint8 mask of the playing surface
     line_pixels: np.ndarray      # uint8 mask of pixels that look like paint
     segments: np.ndarray         # (n, 4) raw Hough segments
     lines: list[DetectedLine] = field(default_factory=list)
+    model: Optional[GrassModel] = None
 
 
-def grass_mask(bgr: np.ndarray, cfg: LineDetectionConfig) -> np.ndarray:
+def estimate_grass(bgr: np.ndarray, cfg: LineDetectionConfig) -> GrassModel:
+    """The dominant surface colour in the lower part of the frame, which is
+    where a camera looking at a pitch has the pitch. Hue is the peak of the
+    histogram inside a wide prior; saturation and value are the spread of
+    the pixels at that hue. Falls back to the fixed ranges when there is
+    too little surface to estimate from (a frame of sky, a title card)."""
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
-    lo, hi = cfg.grass_hue
-    m = ((h >= lo) & (h <= hi) & (s >= cfg.grass_min_sat) & (v >= cfg.grass_min_val)).astype(np.uint8) * 255
+    top = int(hsv.shape[0] * cfg.grass_roi_top)
+    roi = hsv[top:].reshape(-1, 3)
+    H, S, V = roi[:, 0].astype(np.int32), roi[:, 1], roi[:, 2]
+    prior = (H >= cfg.grass_hue_prior[0]) & (H <= cfg.grass_hue_prior[1])
+    prior &= (S >= cfg.grass_prior_min_sat) & (V >= cfg.grass_prior_min_val)
+    if int(prior.sum()) < cfg.grass_min_prior_px:
+        return GrassModel(cfg.grass_hue, (cfg.grass_min_sat, 255), (cfg.grass_min_val, 255), 128.0, 128.0, False)
+    hist = np.bincount(H[prior], minlength=180).astype(np.float64)
+    hist = np.convolve(hist, np.ones(5) / 5.0, mode="same")
+    peak = int(np.argmax(hist))
+    lo, hi = max(0, peak - cfg.grass_hue_tol), min(179, peak + cfg.grass_hue_tol)
+    sel = prior & (H >= lo) & (H <= hi)
+    s_lo, s_hi = np.percentile(S[sel], cfg.grass_sv_percentiles)
+    v_lo, v_hi = np.percentile(V[sel], cfg.grass_sv_percentiles)
+    pad = cfg.grass_range_pad
+    return GrassModel(
+        (lo, hi),
+        (max(0, int(s_lo) - pad), min(255, int(s_hi) + pad)),
+        (max(0, int(v_lo) - pad), min(255, int(v_hi) + pad)),
+        float(np.median(S[sel])), float(np.median(V[sel])), True,
+    )
+
+
+def grass_mask(bgr: np.ndarray, cfg: LineDetectionConfig, model: Optional[GrassModel] = None) -> np.ndarray:
+    model = model or estimate_grass(bgr, cfg)
+    m = model.mask(cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV))
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (cfg.grass_close_px, cfg.grass_close_px))
     # Closing swallows the lines and the players, which are holes in the
     # green; opening drops small green things that are not the pitch.
@@ -97,21 +171,33 @@ def grass_mask(bgr: np.ndarray, cfg: LineDetectionConfig) -> np.ndarray:
         return np.zeros_like(m)
     largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
     m = (labels == largest).astype(np.uint8) * 255
-    # Fill holes so a white kit or a goal net in the middle of the pitch does
-    # not punch a hole in the surface.
+    # Fill holes, but only small ones. A player, a ball or a goal net is a
+    # hole in the grass and should not punch a hole in the surface. A road
+    # with parked cars, with grass on both sides of it, is also enclosed and
+    # is not the surface; filling it is how the line detector came to find
+    # "lines" on car doors on the first real Veo export.
     padded = np.pad(m, 1)
     ff = padded.copy()
     cv2.floodFill(ff, np.zeros((padded.shape[0] + 2, padded.shape[1] + 2), np.uint8), (0, 0), 255)
     holes = cv2.bitwise_not(ff)
+    hn, hlabels, hstats, _ = cv2.connectedComponentsWithStats(holes, 8)
+    if hn > 1:
+        small = np.zeros(hn, dtype=bool)
+        small[1:] = hstats[1:, cv2.CC_STAT_AREA] <= cfg.grass_max_hole_frac * m.size
+        holes = np.where(small[hlabels], 255, 0).astype(np.uint8)
     return cv2.bitwise_or(padded, holes)[1:-1, 1:-1]
 
 
-def line_pixel_mask(bgr: np.ndarray, grass: np.ndarray, cfg: LineDetectionConfig) -> np.ndarray:
+def line_pixel_mask(bgr: np.ndarray, grass: np.ndarray, cfg: LineDetectionConfig, model: Optional[GrassModel] = None) -> np.ndarray:
+    model = model or estimate_grass(bgr, cfg)
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     s, v = hsv[..., 1], hsv[..., 2]
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (cfg.tophat_px, cfg.tophat_px))
     tophat = cv2.subtract(v, cv2.morphologyEx(v, cv2.MORPH_OPEN, k))
-    cand = (tophat >= cfg.tophat_thresh) & (s <= cfg.line_max_sat) & (v >= cfg.line_min_val) & (grass > 0)
+    # Paint is brighter than the grass right beside it (the top-hat) and
+    # less saturated than the grass is. Both relative to this frame's grass.
+    cand = (tophat >= cfg.tophat_thresh) & (s <= model.s_median * cfg.line_sat_ratio)
+    cand &= (v >= model.v_median * cfg.line_val_ratio) & (grass > 0)
     cand = cand.astype(np.uint8) * 255
     n, labels, stats, _ = cv2.connectedComponentsWithStats(cand, 8)
     if n <= 1:
@@ -257,7 +343,8 @@ def split_families(lines: list[DetectedLine], min_separation_deg: float = 20.0) 
 
 def detect_lines(bgr: np.ndarray, cfg: Optional[LineDetectionConfig] = None) -> LineDetection:
     cfg = cfg or LineDetectionConfig()
-    grass = grass_mask(bgr, cfg)
-    pixels = line_pixel_mask(bgr, grass, cfg)
+    model = estimate_grass(bgr, cfg)
+    grass = grass_mask(bgr, cfg, model)
+    pixels = line_pixel_mask(bgr, grass, cfg, model)
     segs = detect_segments(pixels, cfg)
-    return LineDetection(grass, pixels, segs, merge_segments(segs, cfg))
+    return LineDetection(grass, pixels, segs, merge_segments(segs, cfg), model)
