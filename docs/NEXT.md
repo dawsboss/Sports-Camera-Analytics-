@@ -174,12 +174,16 @@ nobody else's data looks like a youth match on a school field. That is
    visible too: those are what stop a detector firing on a corner flag.
    Train on the homelab GPU, and measure with `ball_recall.py` on the
    held-out match, never the one trained on.
-2. **The line network fine-tuned on this footage**, from the baseline's
-   published weights. Label pitch lines as polylines on 200 to 300 frames
-   across both matches. Plug its masks into the existing hypothesis
-   search behind the `Registrar` interface: the search needs no change,
-   it just receives clean lines, and because the network names them the
-   naming search collapses to a lookup. Pitch dimensions must be measured
+2. **A pitch keypoint model, not a line model.** Changed after reading
+   roboflow/sports: a model that emits 32 *named* pitch points removes
+   the naming search entirely, where a line model only feeds it. Adopt
+   their 32-vertex layout, pretrain on their public dataset, fine-tune on
+   frames tagged here. Community weights on that layout were tested on
+   both exports and are confidently wrong — keypoints in the sky, or a
+   penalty box drawn on open grass — so the data has to be ours.
+   `spike/evals/PITCH_KEYPOINTS.md` has the evidence. Tagging a named
+   point is the gesture the tagger already implements, so this is an
+   extension of `web/label.html`, not a new tool. Pitch dimensions must be measured
    for each field first; the search assumes 105 x 68 and neither of these
    pitches is.
 3. **Player detection and tracking (M3)** can start now. Off-the-shelf
