@@ -86,6 +86,14 @@
     padding: 7px 16px; font-size: 13px; color: var(--chalk); pointer-events: none;
     backdrop-filter: blur(6px); text-align: center; max-width: calc(100% - 28px);
   }
+  .blocked {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(440px, calc(100% - 32px));
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px; display: flex; flex-direction: column; gap: 12px;
+    box-shadow: var(--shadow); font-size: 13.5px; line-height: 1.55; color: var(--muted);
+  }
+  .blocked b { color: var(--chalk); font-weight: 600; }
   .badge {
     position: absolute; top: 10px; left: 10px;
     font-family: var(--mono); font-size: 11px; padding: 5px 9px; border-radius: 6px;
@@ -428,6 +436,8 @@
     state.match = m;
     state.pending = null; state.last = null; state.burstLeft = BURST;
     setZoom(false);
+    var stale = stagewrap.querySelector(".blocked");
+    if (stale) stale.remove();
     vid.src = m.url;
     seek.disabled = false;
     hint.textContent = "Loading video…"; hint.hidden = false;
@@ -441,11 +451,44 @@
     });
     vid.addEventListener("error", function onErr() {
       vid.removeEventListener("error", onErr);
-      hint.textContent = "Video would not load — check the link in the menu";
-      hint.hidden = false;
+      showBlocked();
     });
     closeSheet();
     draw();
+  }
+
+  /* ---------- when the video will not load ---------- */
+  // Some hosts refuse to fetch media from another site. A Claude artifact is
+  // one of them: its content policy allows scripts and fonts from a short
+  // list and blocks everything else, video included, so this page cannot
+  // play a Veo file there however correct the link is. Served from GitHub
+  // Pages, or opened as a local file, the same page works. Say which of
+  // those it is rather than making the reader guess at a dead frame.
+  function embedded() {
+    try { return window.self !== window.top; } catch (e) { return true; }
+  }
+  function showBlocked() {
+    hint.hidden = true;
+    var box = el("div", "blocked");
+    var h = el("h3", null, embedded() ? "This page cannot play video here" : "That video would not load");
+    h.style.color = "var(--chalk)";
+    h.style.fontSize = "15px";
+    h.style.textTransform = "none";
+    h.style.letterSpacing = "0";
+    box.appendChild(h);
+    var p = el("p");
+    p.style.margin = "0";
+    p.innerHTML = embedded()
+      ? "The page it is embedded in only allows video from its own list of sites, and Veo is not on it. "
+        + "Nothing is wrong with the link. Host this page yourself and it plays: <b>web/README.md</b> in the "
+        + "Sports-Camera-Analytics repository has the steps, and it is about five taps on github.com."
+      : "Check the link in the menu. A Veo <b>match page</b> address will not work here — the page needs the "
+        + "direct video file, ending in <b>.mp4</b>.";
+    box.appendChild(p);
+    var b = el("button", "btn", "Open the menu");
+    b.addEventListener("click", openSheet);
+    box.appendChild(b);
+    stagewrap.appendChild(box);
   }
 
   /* ---------- menu ---------- */

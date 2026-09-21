@@ -8,7 +8,9 @@ name: Pages
 
 on:
   push:
-    branches: [main]
+    # This repository's default branch is the claude/ one, not main, so a
+    # workflow listening only for main would never fire.
+    branches: [claude/camera-data-project-s7hv59, main]
     paths: ['web/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 

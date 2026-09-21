@@ -103,20 +103,41 @@ teammate. None of it needs pitch coordinates, and all of it needs the
 ball found reliably. This is blocked on ball detection and on nothing
 else.
 
-**Goal kick, corner, throw-in, drop ball.** Restarts: the ball stops,
-the players reorganise, the ball is put back in play from a particular
-place. Telling them apart needs where the ball is on the pitch, so
-registration, or a cheaper proxy that is good enough on follow-cam
-footage: what the camera is pointing at (a corner flag in frame, the
-goal frame in frame, a player standing on the touchline holding the
-ball overhead). The minutes app already records these by hand with the
-player attributed. Those taps are the ground truth to measure a
-detector against, and the tapping should continue for that reason.
+**Restarts, and counting them.** This is the better target, and it
+replaces what was written here before about detecting fouls. Do not try
+to detect a foul: a foul is a referee's judgement, announced by a whistle
+this footage has no audio for, and play stops for a dozen other reasons
+that look identical. Detect the **restart that follows** instead. Every
+restart is a visible, physical event, and the ones that matter are:
 
-**Fouls.** Not detectable from video alone. Play stops for many reasons
-and only the referee's whistle and signal say which. Keep the Track tab
-for fouls; the camera can timestamp the stoppage around a tapped foul,
-which is a useful thing to show, and no more.
+| Restart | What it looks like | What the count tells a coach |
+| --- | --- | --- |
+| Throw-in | ball stationary off the touchline, thrown two-handed overhead | how much play dies on the flanks, and who wins the second ball |
+| Corner | ball placed in the corner arc | attacking pressure earned, and whether it converts |
+| Goal kick | ball placed in the six-yard box | how often the other side turns it over deep |
+| Free kick | ball placed still, a wall forms, a whistle precedes it | where fouls are being conceded, without ever detecting a foul |
+| Kick-off | ball on the centre spot, both sides in their halves | segments the match and marks every goal |
+| Drop ball | rare; referee stands over a stationary ball with one player each side | mostly a stoppage marker |
+
+Three things make this the right shape. A restart is **observable** where
+a foul is not. Every restart is **also a possession change**, so one
+detector serves both of the things asked for. And the **count per type
+per team** is the part a coach acts on — "we conceded fourteen free kicks
+in our own half" is a training session, where "there were fourteen fouls"
+is not.
+
+What it needs: the ball found and tracked, then a stationary-ball test
+(the ball still for a second or two, then struck hard), then *where* on
+the pitch that happened, which is what separates a corner from a throw-in
+from a goal kick. So it depends on both open items, ball and
+registration, and on nothing else. The rough position may be enough:
+distinguishing the corner arc from the six-yard box from the touchline
+does not need the two-metre accuracy the spec's gate asks for.
+
+The minutes app already records corners, throw-ins, goal kicks, fouls and
+keeper claims by hand, with the player attributed. Those taps are the
+ground truth this detector is measured against, so they are worth
+continuing for that reason alone.
 
 **Possession share in general.** Falls out of possession above.
 
@@ -167,7 +188,10 @@ nobody else's data looks like a youth match on a school field. That is
    the GPU.
 4. **Identity (S4, S6):** kit-colour team split, then fragment linking
    using stints from the minutes app. This is where the two systems meet.
-5. **Restart events**, once 1 and 2 hold.
+5. **Restarts and possession**, once 1 and 2 hold. Possession first, since
+   it is ball-and-players only; then the stationary-ball test that finds
+   restarts; then the restart type from where on the pitch it happened.
+   Counts per type per team are the output a coach reads.
 
 Item 1 is the gate now, in the same sense M1 was: if the ball cannot be
 found reliably on this footage, the possession half of the wish list is

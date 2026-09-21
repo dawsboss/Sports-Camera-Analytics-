@@ -47,18 +47,48 @@ cannot work the one out from the other in a browser (Veo's page blocks
 cross-origin reads). Send the match link to Claude and it will resolve it
 and add it to the list in `label.html`.
 
-## Where it runs
+## Hosting it (about five taps, all doable on a phone)
 
-Two places, same file:
+The page has to be served from somewhere before it can play the footage.
+A Claude artifact cannot: its content policy allows scripts and fonts
+from a short list of sites and blocks all other media, so the video never
+loads there however right the link is. GitHub Pages has no such rule.
 
-- **As a Claude artifact**, which is how it got used first — instant on a
-  phone, but the sandbox blocks file downloads and cross-origin requests,
-  so it is local storage and copy-out only.
-- **On GitHub Pages**, alongside the minutes app, which is where it
-  belongs long term. There it can also write to Firebase, if a project is
-  set up for it. Keep that a *separate* Firebase project from the minutes
-  app: soccer-manager's rules are one document covering its whole
-  database, and its own README warns that a bad paste fails silently with
-  every write refused. Tagging data has no business sharing that blast
-  radius, and the camera project's boundary is that only finished
-  aggregates go into the minutes app's Firebase.
+This repository is public, so Pages is free. The workflow that publishes
+`web/` is already committed and waiting.
+
+1. On github.com open **dawsboss/Sports-Camera-Analytics-**
+2. **Settings** (you may need the `...` menu on a narrow screen)
+3. **Pages** in the left list
+4. Under **Build and deployment**, set **Source** to **GitHub Actions**
+5. That is all it needs. The next push to `web/` deploys; to publish
+   immediately instead, open **Actions → Pages → Run workflow**.
+
+The page then lives at:
+
+```
+https://dawsboss.github.io/Sports-Camera-Analytics-/label.html
+```
+
+Add it to the home screen and it behaves like an app. Tags are kept per
+device and per site, so tags made at that address stay at that address.
+
+## Why not just use it as a Claude artifact
+
+That was the first attempt and it does not work, which is worth
+recording so nobody tries again. An artifact is served inside a content
+policy that admits scripts from a couple of CDNs and fonts from Google,
+and blocks every other outside resource, media included. The page loads
+and looks right; the video silently never arrives. The page now says so
+when it detects it is embedded, rather than leaving a black frame.
+
+Served from GitHub Pages, or opened as a plain local file, the same file
+plays the footage. Pages is also where it can eventually write to
+Firebase, which the artifact policy blocks for the same reason.
+
+Keep that Firebase project **separate** from the minutes app's:
+soccer-manager's rules are one document covering its whole database, and
+its own README warns that a bad paste fails silently with every write
+refused. Tagging data has no business sharing that blast radius, and the
+camera project's boundary is that only finished aggregates go into the
+minutes app's Firebase.
