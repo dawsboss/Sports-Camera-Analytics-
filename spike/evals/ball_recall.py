@@ -103,7 +103,9 @@ def main() -> None:
         all_gaps += g
         hits += h
         seen += len(samples)
-        print(f"  burst at {int(s)/fps/60:5.1f} min: {h:2d}/{len(samples)} found, gaps {g}")
+        # Flushed: a full run is twenty minutes on a CPU, and a progress line
+        # that only appears at the end is not a progress line.
+        print(f"  burst at {int(s)/fps/60:5.1f} min: {h:2d}/{len(samples)} found, gaps {g}", flush=True)
     cap.release()
 
     print(f"\n{args.video.name} with {args.weights}")
