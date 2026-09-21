@@ -1,8 +1,9 @@
-# Ball Tagger
+# Sideline Tagger
 
-A page for tapping the ball on match footage, from a phone, to build the
-training data a ball detector needs. `label.html` is the whole thing: one
-static file, no build step, no upload, no video software.
+A page for tapping things on match footage, from a phone, to build the
+training data the models need. `label.html` is the whole thing: one static
+file, no build step, no upload, no video software. It tags two things:
+the **ball**, and the **pitch**.
 
 It works because Veo serves the follow-cam cut from its CDN with no login
 and no CORS headers. A browser can *play* that video but cannot read its
@@ -10,18 +11,33 @@ pixels, which is exactly the split this needs: the page shows you the
 frame and records where you tapped, and the pipeline pulls the matching
 frame out of its own copy later.
 
-## Using it
+## Ball mode
 
-Open the page, pick a match, tap the ball, press **Save & next**. It works
-in bursts: twenty samples a fifth of a second apart, then it jumps
-somewhere else in the match. Consecutive frames are what a detector learns
-motion from, and labelling them in a run also shows how far the ball moves
-between samples.
+Pick a match, tap the ball, press **Save & next**. It works in bursts:
+twenty samples a fifth of a second apart, then it jumps somewhere else in
+the match. Consecutive frames are what a detector learns motion from, and
+labelling them in a run also shows how far the ball moves between samples.
 
 **Tag the misses too.** When the ball is off screen, behind a player or in
 the air against the trees, press **Not visible**. Those frames are what
 teach the detector to stay quiet, and without them it fires on corner
 flags and white socks.
+
+## Pitch mode
+
+Tap a point on the little pitch at the bottom, then tap that same point on
+the video. After four points the page fits a homography and draws every
+remaining vertex as a dashed ring where it must be — tap one to accept it.
+That is the difference between thirty taps a frame and about ten.
+
+Four points is the minimum to save and eight or more is better. Skip any
+frame where you cannot find four. Frames here are spread across the whole
+match rather than taken in bursts, because what a keypoint model needs is
+variety of camera angle, not continuity.
+
+The 32 vertices and their order are Roboflow's, adopted verbatim so their
+public dataset can pretrain the model. See
+`spike/evals/PITCH_KEYPOINTS.md` for why keypoints replaced line-finding.
 
 Tags are kept in the browser on that device. When you have a few hundred,
 open **Menu** and **Copy tags**, and paste the JSON somewhere the pipeline
