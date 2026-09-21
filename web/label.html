@@ -1,4 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Without a viewport a phone lays this out at its default 980px and then
+     shrinks the result to fit, which is how the tagger arrived as unreadable
+     text with the match buttons off the right edge. And without a doctype the
+     whole thing renders in quirks mode, where the percentage heights the two
+     screens are built on do not resolve. viewport-fit=cover is what makes the
+     env(safe-area-inset-*) padding below mean anything on a notched phone. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16150F">
 <title>Sideline Tagger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
   :root {
@@ -25,6 +39,12 @@
     -webkit-font-smoothing: antialiased; overscroll-behavior: none;
   }
   * { box-sizing: border-box; }
+  /* The browser hides [hidden] with display:none, which any class here that
+     sets display outranks. .sheet is display:flex, so the modal scrim was
+     painted over the page from the first paint: everything behind it dimmed
+     to a quarter brightness and every tap landed on the scrim instead of a
+     button. Same for .diagram and .row. Hidden has to win. */
+  [hidden] { display: none !important; }
   button { font: inherit; color: inherit; cursor: pointer; }
   button:focus-visible, input:focus-visible, textarea:focus-visible {
     outline: 2px solid var(--flag); outline-offset: 2px;
@@ -216,6 +236,8 @@
   }
   .note b { color: var(--chalk); font-weight: 600; }
 </style>
+</head>
+<body>
 
 <div class="start" id="startScreen">
   <div class="brand">
@@ -971,3 +993,6 @@
   vid.addEventListener("durationchange", syncScrub);
 })();
 </script>
+
+</body>
+</html>
