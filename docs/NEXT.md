@@ -51,12 +51,25 @@ epsilon it needs, without which it predicts nothing.
 | | Result on real frames |
 | --- | --- |
 | Players, off-the-shelf detector (COCO, small model, 1280 px) | 19 to 32 per frame, 55 to 65 px tall, including spectators and coaches on the sideline |
-| Ball, same model | 1 frame of 8 |
-| Ball, largest COCO model at 1920 px, 6 to 10 s per frame on CPU | 1 frame of 4 |
+| Ball, largest COCO model at 1920 px, consecutive samples at 5 fps | **varies hugely by passage of play**: one burst 12 of 12 with no gap, another 7 of 12 with gaps of 2 and 3 samples, another 8 of 40 with gaps of 13 and 15 |
 | Ball, a fine-tuned soccer-ball model from Hugging Face | 3 frames of 12, at 0.2 to 0.3 confidence, with boxes 33 to 59 px wide where the ball is 15 to 35 px: not the ball |
 
-Players are solved off the shelf. The ball is not, by any model tried,
-and that decides the order of the work below.
+Players are solved off the shelf.
+
+**The ball needs measuring over consecutive frames, not scattered ones,
+and the first attempt here got that wrong.** Frames sampled minutes apart
+said "1 of 8" and meant nothing: what matters is whether a tracker can
+carry the ball across the samples where detection misses, and only
+neighbouring samples answer that. Measured properly with
+`spike/evals/ball_recall.py`, the off-the-shelf model is far better than
+that first number suggested and wildly uneven — some passages every
+sample, others three-second blackouts. A gap of one or two samples is
+bridged by any tracker; a gap of fifteen is three seconds, in which the
+ball crosses half a pitch, and nothing may be drawn across it.
+
+So the question is not "does the ball get detected" but "how much of the
+match is in the good regime", and closing the bad stretches is what
+fine-tuning is for.
 
 ## What each thing you asked for needs
 
@@ -95,16 +108,39 @@ which is a useful thing to show, and no more.
 
 **Possession share in general.** Falls out of possession above.
 
+## Build our own models, or fine-tune someone else's?
+
+Fine-tune, every time. Training a detector from nothing needs tens of
+thousands of labelled images and buys nothing here: a pretrained backbone
+already knows edges, grass, texture and people, and the only thing it does
+not know is what *this* footage looks like. That part is a few hundred to
+a few thousand labelled frames, which is an evening with the tagger rather
+than a research project.
+
+So the models are borrowed and the data is ours, and the data is the part
+that actually matters. Concretely:
+
+| For | Start from | Teach it |
+| --- | --- | --- |
+| Ball | an Ultralytics YOLO checkpoint | what a 10-25 px ball looks like on this grass, and what is not one |
+| Players | nothing, for now | off-the-shelf detection already finds 20-30 a frame |
+| Pitch lines | SoccerNet's calibration baseline weights | faint paint on worn olive turf, and that the road is not a touchline |
+
+The one thing worth building from scratch is the labelling loop, because
+nobody else's data looks like a youth match on a school field. That is
+`web/label.html` and `spike/labels/build_dataset.py`.
+
 ## Next steps, in order
 
-1. **A ball detector trained on this footage.** Everything possession-
-   shaped waits on it, and no existing model works here. Labelling can be
-   mostly automatic: the follow-cam keeps the ball near the frame centre,
-   and the ball is the only small bright thing that moves fast, so a
-   motion-and-centre prior proposes candidates and a person confirms
-   them, a few hundred frames in an hour or two. Train on a GPU (the
-   homelab), evaluate on frames from the *other* match, never the one
-   trained on.
+1. **A ball detector fine-tuned on this footage.** Everything
+   possession-shaped waits on closing the blackout stretches above. The
+   labels come from `web/label.html`, a phone page that plays the Veo
+   footage and records where you tap, and
+   `spike/labels/build_dataset.py`, which cuts the tagged frames and
+   writes them for training. Tag the frames where the ball is *not*
+   visible too: those are what stop a detector firing on a corner flag.
+   Train on the homelab GPU, and measure with `ball_recall.py` on the
+   held-out match, never the one trained on.
 2. **The line network fine-tuned on this footage**, from the baseline's
    published weights. Label pitch lines as polylines on 200 to 300 frames
    across both matches. Plug its masks into the existing hypothesis
