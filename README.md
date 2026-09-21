@@ -15,8 +15,8 @@ tracks. Raw video never leaves the homelab.
 
 | Milestone | State |
 | --- | --- |
-| M1 registration spike | Machinery built and tested on rendered frames. **Not yet run on a real Veo export, which is the gate.** |
-| M2 skeleton | API, Postgres, MinIO, RQ worker, S0 ingest and S1 sampling. Runs with no services on a laptop, or under `docker compose`. |
+| M1 registration spike | **Run on a real Veo export and failing: 0% of frames registered against the 70% gate.** Root cause found and written up in [`spike/evals/`](spike/evals/); a first fix attempt was tried, made things worse on real footage in a different way, and was reverted rather than shipped half-working. Fixing the line-finding this depends on is the actual next work. |
+| M2 skeleton | API, Postgres, MinIO, RQ worker, S0 ingest and S1 sampling. Runs with no services on a laptop, or under `docker compose`. Not worth building on top of until M1 passes. |
 | M3 onward | Not started. |
 
 ## Run the M1 spike

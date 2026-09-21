@@ -7,9 +7,12 @@ no services. Publishes aggregates to Firebase under a `soccer-manager`
 fixture; that app stays a static site that consumes JSON.
 
 Read `docs/SPEC.md` before changing anything structural. It is a copy of
-the living design doc, and its milestone order is the work order: M1 (does
-per-frame registration work on real Veo footage?) is a gate that has not
-been run yet, M2 (the skeleton) is built, M3 onward is not started.
+the living design doc, and its milestone order is the work order: M1 has
+now been run on a real Veo export and **failed** (0% registered against
+the 70% gate — see `spike/evals/veo_match_2026-09-19.md`), M2 (the
+skeleton) is built, M3 onward is not started. M1 is not "done, move on" —
+it is failing, and fixing the line-finding it depends on is the actual
+next work, ahead of anything in M2 onward.
 
 ## Required after every change
 
@@ -79,11 +82,38 @@ been run yet, M2 (the skeleton) is built, M3 onward is not started.
 - `FollowCamRegistrar.keep_candidates = True` keeps every scored
   hypothesis of the last frame in `last_candidates`; compare against
   truth before guessing why a frame failed.
+- **On real footage, the bottleneck is line-finding, not the homography
+  search or its scoring.** Two independent real datasets (SoccerNet
+  broadcast frames, `spike/evals/README.md`; a real Veo export,
+  `spike/evals/veo_match_2026-09-19.md`) converge on the same bug:
+  `grass_mask()`'s hole-filling treats anything enclosed by the largest
+  green blob as grass, so a road, parked cars, or advertising boards get
+  swallowed in and the line detector finds "lines" on them. When real
+  pitch lines are found cleanly, the fit is still accurate to about a
+  metre, same as synthetic.
+- **A flank-based fix was tried and reverted — do not re-attempt it
+  without reading why first.** Requiring raw (unfilled) grass colour on
+  both sides of a candidate line broke two synthetic accuracy tests (a
+  real box-edge line can have another real pitch line close enough on one
+  flank to occupy the sample points) and, loosened to either side, still
+  let real false lines through — a hand-confirmed genuine line in the Veo
+  footage only reaches 75% raw-grass fraction on its best flank, which
+  overlaps the false lines' range. A fixed colour threshold tuned on
+  clean synthetic grass does not transfer to real turf's shadows, mowing
+  stripes and compression noise. The fix needs a per-frame-adaptive grass
+  colour model (sample the dominant colour inside the coarse grass region,
+  test flanks against that instead of a global threshold), not a stricter
+  version of the same fixed-threshold idea.
 
 ## Known gaps
 
-- M1 has not been run on a real Veo export. Everything about registration
-  quality is from rendered frames.
+- M1 has been run on one real Veo export and failed (0% registered). It
+  needs to pass on the fixed three-match evaluation set the spec asks for
+  before anything downstream is worth building on top of it — the spec's
+  own words: "if a match takes an hour of clicking [or, here, doesn't
+  register at all], the honest response is to stop and build the camera
+  first rather than optimise the wrong pipeline." One match's fix should
+  not be trusted until it holds on the other two.
 - No S2 onward: no detection, tracking, team assignment, identity, review,
   stats or publish. `contracts.py` already defines what they write.
 - Where `player_stats.json` sits under the fixture in soccer-manager's
