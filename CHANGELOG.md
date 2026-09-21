@@ -71,3 +71,12 @@ Both Veo exports run through the pipeline; what the footage says is in
 - The midfield synthetic test now asserts the contract (refused, with a
   reason, no homography in the artifact row) rather than an internal
   detail; the view is still refused.
+
+## 0.1.3 — the tagger reachable at the plain Pages root
+
+`web/` had no `index.html`, only `label.html`, so the bare GitHub Pages
+address (`dawsboss.github.io/Sports-Camera-Analytics-/`) 404ed while the
+documented `/label.html` link worked. Deployment itself was fine — the
+Pages workflow had already run and published successfully. Added
+`web/index.html`, a one-line meta-refresh to `label.html`, so the root
+link works too instead of relying on everyone knowing the exact file.
