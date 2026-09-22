@@ -169,3 +169,6 @@ In descending order of frames saved per hour of work:
 - **Measure before believing.** Every claim above is somebody else's
   paper or dataset card. The bar in this directory is a number from our
   own footage, and none of these have one yet.
+
+`docs/TRAINING.md` is the how: which of these to fetch, how to convert
+them, and the two-stage runs they feed.

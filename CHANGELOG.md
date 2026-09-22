@@ -196,3 +196,35 @@ from other people's papers instead of our footage, and it says so.
   DeepBall) are built for a ball this size, and use the temporal
   structure that our burst measurement says is there. Scored with
   `ball_recall.py` over the same bursts or the number means nothing.
+
+`docs/TRAINING.md` — the GPU training guide drafted separately, on
+`claude/ragging-data-training-hep16d` — gains what follows from the
+survey, and answers the question it left open:
+
+- **Pretrain the pitch model on SoccerNet's calibration set**, not only
+  on the 317-image mirror. Twenty-eight of our 32 vertices are
+  intersections of its named segments; the two penalty spots are not
+  lines and the two circle extremes need an ellipse fit, so those four
+  are written `0 0 0` and left to our own tags.
+- **Check the public ball set's box sizes before using it as stage one.**
+  Ours is 11 px. A stage one full of 40 px balls teaches a scale prior
+  that stage two has to unlearn; match the pixel size by choosing
+  `imgsz`, not the resolution.
+- **`mosaic=0.0` and `scale=0.2` for the ball.** Mosaic tiles four images
+  into one frame and halves every object's linear size, and the default
+  `scale` can halve it again — harmless for a 60 px person, fatal for an
+  11 px ball. And not `freeze`: the shift here is grass colour and faint
+  paint, which lives in the early layers that freezing would pin.
+- **Hold out by time, not only by match, while there are two matches.**
+  Holding out the green field measures the case we already pass; holding
+  out the worn field leaves no worn-turf training data at all. Split the
+  worn match into tagged and held-out halves until a third match exists.
+- **Quote the gap distribution, not mAP.** A box six pixels off centre
+  scores near-zero IoU and is a perfectly good ball for possession and
+  restarts.
+- **`flip_idx` resolved.** An image mirror moves the camera to a mirrored
+  point on the same touchline, so `camera_side` is untouched and the
+  labels permute by `x -> LENGTH - x`. Derived from `VERTICES` rather
+  than copied, it is an involution, and the four halfway-line vertices
+  map to themselves — so mirroring fixes the left/right imbalance and
+  cannot help those four at all.
