@@ -80,3 +80,36 @@ documented `/label.html` link worked. Deployment itself was fine — the
 Pages workflow had already run and published successfully. Added
 `web/index.html`, a one-line meta-refresh to `label.html`, so the root
 link works too instead of relying on everyone knowing the exact file.
+
+## 0.1.4 — the tagger was behind its own modal, at a tenth of its size
+
+The page on Pages came up dim and inert: everything roughly a quarter
+brightness, and no button, link or match did anything when tapped.
+
+Two independent faults, both in the markup around the app rather than in
+the app:
+
+- **The sheet was never hidden.** `.sheet` sets `display: flex`, and a
+  class rule outranks the browser's `[hidden] { display: none }`. So the
+  modal's full-screen `rgba(11,10,7,.78)` scrim was painted over the page
+  from the first frame, dimming everything behind it and taking every tap
+  before it reached a button — `elementFromPoint` at the middle of the
+  start screen returned the scrim, not the match list. `closeSheet()` set
+  `.hidden = true` and nothing happened, which is why the page could not
+  be recovered by tapping it. `.diagram` and `.row` had the same fault,
+  so the pitch diagram and the pitch buttons showed in ball mode too.
+  Hidden now wins outright.
+- **No doctype and no viewport.** The file opened straight into `<title>`,
+  so a phone rendered it in quirks mode at the default 980px layout width
+  and then scaled the result down to fit — measured, a 412px phone laid
+  the page out at 980. That is the "small, and cut off on the right".
+  Added the doctype, a real `<head>`, `charset`, and
+  `width=device-width` with `viewport-fit=cover`, which is also what makes
+  the existing `env(safe-area-inset-*)` padding mean anything.
+
+`web/index.html` was missing the same doctype and viewport and got them.
+
+Checked in a mobile Chromium at Pixel 7 size, before and after: standards
+mode, layout width equal to the device width, no horizontal overflow, the
+scrim absent until a sheet is opened and gone again when it closes, and
+both screens plus the mode toggle driven by click.
