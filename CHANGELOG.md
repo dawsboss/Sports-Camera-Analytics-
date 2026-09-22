@@ -113,3 +113,51 @@ Checked in a mobile Chromium at Pixel 7 size, before and after: standards
 mode, layout width equal to the device width, no horizontal overflow, the
 scrim absent until a sheet is opened and gone again when it closes, and
 both screens plus the mode toggle driven by click.
+
+## 0.1.5 — the tagger's gestures, and what happens to a point you cannot see
+
+Tagging on a phone was fighting the person doing it. Everything here is in
+`web/label.html`; nothing in the pipeline changed.
+
+- **Looking closer no longer moves the mark.** The frame had one zoom — a
+  fixed 4x about wherever the last tap landed — and every `pointerdown`
+  on the video placed a pin, so pinching to check the ball placed a pin
+  instead, and there was no way to pan to a ball that was not under the
+  point you zoomed at. The stage now reads pointers itself under
+  `touch-action: none`: a tap places, a drag on a mark moves that mark, a
+  drag anywhere else moves the frame, two fingers pinch, and a **&minus; /
+  + / fit** control does the same one-handed. A mark is only placed by a
+  press that does not travel.
+- **Zoom in pitch mode at all.** Zoom was wired to ball mode only, which
+  made a distant corner flag a guess. It is the same gesture layer in both
+  modes now, to 10x, and marks counter-scale so a pin stays the size of a
+  pin however far in you are.
+- **Undo is a stack.** It deleted the last key of the pins object, and
+  JavaScript returns integer-like keys in numeric order however they went
+  in — so it removed the highest-numbered vertex, not the one just placed.
+  Placement order is kept separately now, and undoing re-arms the point it
+  removed so putting it back is one tap.
+- **A point you cannot see has an answer.** Vertices hidden by a player,
+  off the edge, or never painted on a school field now get **can't see
+  it**: the point greys out on the diagram and stops being offered for
+  that frame. Leaving it out is correct rather than a compromise — the
+  pose model learns which points are present as much as where they are, so
+  a guessed corner is a wrong label and a missing one costs nothing.
+- **Marks that can be seen.** An unplaced diagram dot was panel-grey on a
+  panel; predicted rings were a thin dashed outline that vanished over
+  white kits and bright turf. Both now differ in fill and outline in every
+  state, the dots are larger, and the diagram picks the vertex nearest the
+  tap instead of whichever invisible hit circle was drawn last — goal-line
+  points sit a few pixels apart there and the overlap meant the point you
+  got was the one with the higher number.
+- **Accepting a suggested ring says which point it took**, because a ring
+  accepted by accident is otherwise a silent wrong label. With a point
+  armed, a ring has to be tapped inside to be taken, so a ring near the
+  point being placed cannot swallow the tap meant for it.
+- **Taps outside the frame are ignored.** The stage is wider than the
+  video; a tap in the black beside it used to clamp onto the nearest edge
+  and record a point nobody meant.
+
+`web/tagger.smoke.js` is new: Playwright driving the page in a real
+Chromium, asserting the above. It is not part of `pytest` — none of it is
+reachable without a browser — and `pytest` stays what CLAUDE.md says it is.
