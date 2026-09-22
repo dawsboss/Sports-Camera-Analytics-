@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **A way to tag less.** `spike/labels/fetch_public.py` pulls the two
+  CC-BY-4.0 Hugging Face mirrors of Roboflow's pitch-keypoint (317
+  images) and ball (1,237 images) datasets, which need no account where
+  the Universe links return 401. The pitch set's keypoint order was
+  checked against `pitch_keypoints.py:VERTICES` — its `flip_idx` is the
+  permutation a mirror about the halfway line induces, so it tests that
+  their index *i* and ours name the same point, and it matches at all 32.
+  The fetcher re-runs that check every time and refuses to continue if
+  upstream reorders, because a silently permuted layout would teach the
+  wrong names while still reporting a small reprojection error.
+
+  This does not remove the tagging. Both sets are broadcast footage from
+  stadium cameras, which is the distribution the community weights were
+  confidently wrong on here. It moves the frames we owe from the low
+  thousands to the low hundreds.
+
+- **`docs/TRAINING.md`**: running the two fine-tunes on one NVIDIA box,
+  end to end — environment, the public pretrain, the fine-tune on
+  `tags.json`, and measuring on a held-out match. Ends with an open
+  question rather than a decision: `build_dataset.py` writes no
+  `flip_idx`, so it correctly disables horizontal flips, but the verified
+  layout match means writing one would make `fliplr` sound and would even
+  out a tag set that covers the left goal in nine frames and the right in
+  five.
+
 - **First tags out of the Sideline Tagger**, in `spike/labels/tags.json`:
   94 ball samples in ten bursts and 12 pitch-keypoint frames, all from
   `20260919-flight`, the worn olive field. Coordinates only — no frames,
