@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **First tags out of the Sideline Tagger**, in `spike/labels/tags.json`:
+  94 ball samples in ten bursts and 12 pitch-keypoint frames, all from
+  `20260919-flight`, the worn olive field. Coordinates only — no frames,
+  so this is label data and not footage. `build_dataset.py` reads it
+  as-is: every pitch frame clears the four-point minimum, every ball box
+  lands in range, and the three not-visible samples become the empty
+  label files that teach the detector what is not a ball.
+
+  Not yet enough to train on, and recorded here so the gap is visible:
+  one match means nothing can be held out, the right half of the pitch
+  is tagged in 5 frames against the left half's 9 with no mirror
+  augmentation allowed to even that up, and vertices 16 and 21 have
+  never been tagged at all.
+
 ## 0.1.0 — first commit
 
 The spec ([`docs/SPEC.md`](docs/SPEC.md)) turned into a repository: the M1
