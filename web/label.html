@@ -125,28 +125,79 @@
   .stagewrap {
     flex: 1; min-height: 0; position: relative; overflow: hidden;
     background: #0B0A07; display: flex; align-items: center; justify-content: center;
+    /* Every gesture over the frame belongs to this page. A pinch here has to
+       zoom the frame rather than the page, and a drag has to move the frame
+       rather than count as the tap that places a pin. The browser cannot tell
+       those apart on its own, so it is told to keep out and the script reads
+       the pointers itself. Without this, pinching to look closer landed as a
+       tap and moved the pin you were trying to check. */
+    touch-action: none; -webkit-user-select: none; user-select: none;
   }
-  .zoomer { position: relative; width: 100%; max-height: 100%; transition: transform .18s ease; will-change: transform; }
-  video { display: block; width: 100%; height: auto; max-height: 100%; background: #000; touch-action: manipulation; }
+  /* Zoom is a scale about the frame's top-left plus an explicit translation,
+     not a transform-origin trick: an origin can only decide what a scale
+     grows away from, it cannot pan afterwards, which is why the zoomed frame
+     used to be stuck wherever the first tap put it. --iz is 1/scale, and
+     every mark multiplies its size by it, so a pin stays the same size on
+     screen however far in you are. */
+  .zoomer {
+    position: relative; width: 100%; max-height: 100%;
+    transform-origin: 0 0; will-change: transform; --iz: 1;
+  }
+  .zoomer.animate { transition: transform .18s ease; }
+  video { display: block; width: 100%; height: auto; max-height: 100%; background: #000; touch-action: none; }
 
   .marker, .ghost { position: absolute; border-radius: 50%; pointer-events: none; }
   .marker {
-    width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 2px solid var(--flag);
-    box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 0 14px rgba(242,96,60,.5);
+    width: calc(34px * var(--iz)); height: calc(34px * var(--iz));
+    margin: calc(-17px * var(--iz)) 0 0 calc(-17px * var(--iz));
+    border: calc(2px * var(--iz)) solid var(--flag);
+    box-shadow: 0 0 0 calc(1px * var(--iz)) rgba(0,0,0,.6), 0 0 calc(14px * var(--iz)) rgba(242,96,60,.5);
   }
-  .marker::after { content: ""; position: absolute; inset: 14px; border-radius: 50%; background: var(--flag); }
-  .ghost { width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 1px dashed rgba(242,239,228,.45); }
-  .zoomed .marker { width: 14px; height: 14px; margin: -7px 0 0 -7px; border-width: 1px; }
-  .zoomed .marker::after { inset: 5px; }
-  .zoomed .ghost { width: 10px; height: 10px; margin: -5px 0 0 -5px; }
+  .marker::after { content: ""; position: absolute; inset: calc(14px * var(--iz)); border-radius: 50%; background: var(--flag); }
+  .marker.dragging { border-color: var(--chalk); }
+  .ghost {
+    width: calc(26px * var(--iz)); height: calc(26px * var(--iz));
+    margin: calc(-13px * var(--iz)) 0 0 calc(-13px * var(--iz));
+    border: calc(1px * var(--iz)) dashed rgba(242,239,228,.45);
+  }
 
   .pin {
-    position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+    position: absolute; width: calc(22px * var(--iz)); height: calc(22px * var(--iz));
+    margin: calc(-11px * var(--iz)) 0 0 calc(-11px * var(--iz));
     border-radius: 50%; pointer-events: none;
   }
-  .pin.set { background: var(--grass); border: 2px solid #12210A; }
-  .pin.pred { background: transparent; border: 2px dashed rgba(127,163,184,.9); pointer-events: auto; cursor: pointer; }
-  .zoomed .pin { width: 12px; height: 12px; margin: -6px 0 0 -6px; border-width: 1px; }
+  .pin.set {
+    background: var(--grass); border: calc(2px * var(--iz)) solid #12210A;
+    box-shadow: 0 0 0 calc(1px * var(--iz)) rgba(242,239,228,.55);
+  }
+  .pin.set.dragging { background: var(--flag); }
+  /* A predicted point has to read against grass, white kits, a dark crowd and
+     a bright sky in the same frame, so it is a light ring with a dark halo
+     and a filled centre. A thin dashed outline vanished over anything pale,
+     which is most of what a pitch marking sits on. */
+  .pin.pred {
+    background: transparent; border: calc(2px * var(--iz)) dashed #CFE4F0;
+    box-shadow: 0 0 0 calc(1.5px * var(--iz)) rgba(0,0,0,.7), 0 0 calc(12px * var(--iz)) rgba(127,163,184,.55);
+  }
+  .pin.pred::after {
+    content: ""; position: absolute; inset: calc(6px * var(--iz)); border-radius: 50%;
+    background: rgba(207,228,240,.92);
+  }
+
+  .zoomctl {
+    position: absolute; top: 8px; right: 8px; display: flex;
+    background: rgba(11,10,7,.82); border: 1px solid var(--line); border-radius: 9px;
+    overflow: hidden; font-family: var(--mono);
+  }
+  .zoomctl button {
+    background: none; border: 0; color: var(--chalk); height: 32px; padding: 0 12px;
+    font-size: 15px; line-height: 1; display: flex; align-items: center;
+  }
+  .zoomctl button:disabled { color: var(--line); }
+  .zoomctl #zoomLevel {
+    font-size: 11.5px; color: var(--muted); min-width: 54px; justify-content: center;
+    border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+  }
 
   .hint {
     position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
@@ -175,14 +226,22 @@
     flex: none; background: var(--panel); border-top: 1px solid var(--line);
     padding: 7px 12px 3px; display: flex; flex-direction: column; align-items: center; gap: 3px;
   }
-  .diagram svg { width: 100%; max-width: 320px; height: auto; display: block; touch-action: manipulation; }
+  .diagram svg { width: 100%; max-width: 360px; height: auto; display: block; touch-action: manipulation; }
   .dg-line { stroke: var(--line); stroke-width: 1.4; fill: none; }
-  .dg-dot { fill: var(--raised); stroke: var(--muted); stroke-width: 1.2; }
-  .dg-dot.set { fill: var(--grass); stroke: #12210A; }
-  .dg-dot.armed { fill: var(--flag); stroke: var(--chalk); stroke-width: 2; }
-  .dg-hit { fill: transparent; cursor: pointer; }
-  .dg-name { font-family: var(--mono); font-size: 10.5px; color: var(--muted); height: 14px; }
+  /* An unplaced dot was panel-grey on a panel, which is how points went
+     missing on a phone in daylight. Every state now differs in fill and in
+     outline, so which is which survives a bright screen. */
+  .dg-dot { fill: #7C7563; stroke: var(--chalk); stroke-width: 1; }
+  .dg-dot.set { fill: var(--grass); stroke: #12210A; stroke-width: 1.4; }
+  .dg-dot.skip { fill: none; stroke: var(--line); stroke-width: 1.4; }
+  .dg-dot.armed { fill: var(--flag); stroke: var(--chalk); stroke-width: 2.4; }
+  .dg-foot { display: flex; align-items: center; gap: 10px; min-height: 20px; }
+  .dg-name { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
   .dg-name b { color: var(--flag); font-weight: 600; }
+  .dg-skip {
+    background: none; border: 0; padding: 2px 0; color: var(--sky);
+    font-size: 11.5px; text-decoration: underline; text-underline-offset: 3px;
+  }
 
   .controls {
     flex: none; background: var(--panel); border-top: 1px solid var(--line);
@@ -274,12 +333,20 @@
       <div class="marker" id="marker" hidden></div>
     </div>
     <div class="badge" id="badge" hidden></div>
+    <div class="zoomctl" id="zoomctl" role="group" aria-label="Zoom">
+      <button id="zoomOut" aria-label="Zoom out">&#8722;</button>
+      <button id="zoomLevel" aria-label="Fit the whole frame" title="Fit the whole frame">1.0&#215;</button>
+      <button id="zoomIn" aria-label="Zoom in">+</button>
+    </div>
     <div class="hint" id="hint" hidden></div>
   </div>
 
   <div class="diagram" id="diagram" hidden>
     <div id="dgHost"></div>
-    <div class="dg-name" id="dgName"></div>
+    <div class="dg-foot">
+      <div class="dg-name" id="dgName"></div>
+      <button class="dg-skip" id="btnCantSee" hidden>can&rsquo;t see it &rsaquo;</button>
+    </div>
   </div>
 
   <div class="controls">
@@ -294,7 +361,7 @@
       <button class="btn primary" id="btnNext" disabled>Save &amp; next</button>
     </div>
     <div class="row" id="rowPitch" hidden>
-      <button class="btn narrow" id="btnUndoPin" title="Remove the last point" disabled>&#8630;</button>
+      <button class="btn narrow" id="btnUndoPin" title="Undo the point you placed last" disabled>&#8630; Undo</button>
       <button class="btn" id="btnSkipFrame">Skip</button>
       <button class="btn primary" id="btnSavePitch" disabled>Save &amp; next</button>
     </div>
@@ -358,10 +425,16 @@
   var diagram = $("diagram"), dgHost = $("dgHost"), dgName = $("dgName");
   var sheet = $("sheet"), sheetCard = $("sheetCard");
 
+  // `order` is what undo walks back. The pins themselves live in an object
+  // keyed by vertex number, and a JavaScript object hands back integer-like
+  // keys in numeric order however they went in — so undo used to remove the
+  // highest-numbered point rather than the one just placed, which is the
+  // "queue, not a stack" it felt like. The order of placement has to be kept
+  // separately because nothing else remembers it.
   var state = {
     mode: "ball", match: null, labels: {},
     pending: null, last: null, burstLeft: 0, zoom: false,
-    pins: {}, armed: null, pred: null
+    pins: {}, order: [], skipped: {}, armed: null, pred: null, flash: null
   };
 
   /* ---------- storage ---------- */
@@ -494,17 +567,32 @@
     }
     a = px([PL / 2, PW / 2]);
     s += '<circle class="dg-line" cx="' + a[0].toFixed(1) + '" cy="' + a[1].toFixed(1) + '" r="' + (CCR * sx).toFixed(1) + '"/>';
+    var dgxy = [];
     for (i = 0; i < V.length; i++) {
       a = px(V[i]);
-      s += '<circle class="dg-dot" id="dg' + i + '" cx="' + a[0].toFixed(1) + '" cy="' + a[1].toFixed(1) + '" r="3.4"/>';
-      s += '<circle class="dg-hit" data-i="' + i + '" cx="' + a[0].toFixed(1) + '" cy="' + a[1].toFixed(1) + '" r="11"/>';
+      dgxy.push(a);
+      s += '<circle class="dg-dot" id="dg' + i + '" cx="' + a[0].toFixed(1) + '" cy="' + a[1].toFixed(1) + '" r="4.6"/>';
     }
     dgHost.innerHTML = s + "</svg>";
-    dgHost.querySelector("svg").addEventListener("pointerdown", function (e) {
-      var t = e.target;
-      if (!t || !t.dataset || t.dataset.i === undefined) return;
+    // Nearest vertex to the tap, not whichever invisible hit circle happened
+    // to be drawn last. Goal-line points sit a few pixels apart at this size,
+    // and overlapping hit areas meant the point you got was the one with the
+    // higher number rather than the one under your thumb.
+    var svg = dgHost.querySelector("svg");
+    svg.addEventListener("pointerdown", function (e) {
+      var r = svg.getBoundingClientRect();
+      if (!r.width) return;
+      var k = w / r.width;
+      var mx = (e.clientX - r.left) * k, my = (e.clientY - r.top) * k;
+      var best = null, bd = 18, j, d;
+      for (j = 0; j < dgxy.length; j++) {
+        d = Math.hypot(dgxy[j][0] - mx, dgxy[j][1] - my);
+        if (d < bd) { bd = d; best = j; }
+      }
+      if (best == null) return;
       e.preventDefault();
-      state.armed = (state.armed === Number(t.dataset.i)) ? null : Number(t.dataset.i);
+      delete state.skipped[best];
+      state.armed = (state.armed === best) ? null : best;
       draw();
     });
   }
@@ -512,11 +600,22 @@
     var best = null, bd = Infinity, i;
     if (from == null) return null;
     for (i = 0; i < V.length; i++) {
-      if (state.pins[i] || i === from) continue;
+      if (state.pins[i] || state.skipped[i] || i === from) continue;
       var d = Math.hypot(V[i][0] - V[from][0], V[i][1] - V[from][1]);
       if (d < bd) { bd = d; best = i; }
     }
     return best;
+  }
+  function pitchReset() {
+    state.pins = {}; state.order = []; state.skipped = {};
+    state.armed = null; state.pred = null; state.flash = null;
+  }
+  function placePin(i, xy) {
+    state.pins[i] = xy;
+    var at = state.order.indexOf(i);
+    if (at >= 0) state.order.splice(at, 1);
+    state.order.push(i);
+    delete state.skipped[i];
   }
 
   /* ---------- drawing ---------- */
@@ -534,6 +633,7 @@
     $("modePitch").setAttribute("aria-pressed", String(!isBall));
 
     marker.hidden = true; ghost.hidden = true;
+    marker.classList.remove("dragging");
     clearPins();
 
     if (isBall) {
@@ -545,7 +645,7 @@
       if (g && !p) { ghost.style.left = (g.x * 100) + "%"; ghost.style.top = (g.y * 100) + "%"; }
       $("btnNext").disabled = !p;
       $("btnBack").disabled = vid.currentTime < SAMPLE_STEP;
-      if (p) hint.hidden = true;
+      if (p) { hint.textContent = "Drag the pin to nudge it · pinch or drag to look closer"; hint.hidden = false; }
       else { hint.textContent = state.last ? "Tap the ball — dashed ring is where it was" : "Tap the ball"; hint.hidden = false; }
     } else {
       var i, node, xy;
@@ -554,6 +654,7 @@
         xy = state.pins[i];
         node = document.createElement("div");
         node.className = "pin set";
+        node.dataset.i = i;
         node.style.left = (xy[0] * 100) + "%"; node.style.top = (xy[1] * 100) + "%";
         node.title = VN[i];
         zoomer.appendChild(node);
@@ -566,16 +667,17 @@
           node.className = "pin pred";
           node.style.left = (xy[0] * 100) + "%"; node.style.top = (xy[1] * 100) + "%";
           node.title = "predicted: " + VN[i] + " — tap to accept";
-          node.dataset.pred = i;
           zoomer.appendChild(node);
         }
       }
-      var nPins = Object.keys(state.pins).length;
+      var nPins = state.order.length;
       $("btnSavePitch").disabled = nPins < 4;
       $("btnUndoPin").disabled = nPins === 0;
-      if (state.armed != null) { hint.innerHTML = "Now tap <b>" + VN[state.armed] + "</b> on the video"; hint.hidden = false; }
+      $("btnCantSee").hidden = state.armed == null;
+      if (state.flash) { hint.textContent = state.flash; hint.hidden = false; }
+      else if (state.armed != null) { hint.innerHTML = "Now tap <b>" + VN[state.armed] + "</b> on the video"; hint.hidden = false; }
       else if (nPins < 4) { hint.textContent = "Pick a point below, then tap it above"; hint.hidden = false; }
-      else if (state.pred && Object.keys(state.pred).length) { hint.textContent = "Tap a dashed ring to accept it"; hint.hidden = false; }
+      else if (state.pred && Object.keys(state.pred).length) { hint.textContent = "Tap a ring to accept it · drag a green pin to nudge it"; hint.hidden = false; }
       else hint.hidden = true;
       dgName.innerHTML = state.armed != null ? "placing <b>" + VN[state.armed] + "</b>"
         : (nPins ? nPins + " placed" + (nPins < 4 ? " · 4 needed" : " · tap the rings above") : "pick a point");
@@ -583,6 +685,7 @@
         var dot = $("dg" + i);
         if (!dot) continue;
         dot.classList.toggle("set", !!state.pins[i]);
+        dot.classList.toggle("skip", !state.pins[i] && !!state.skipped[i]);
         dot.classList.toggle("armed", state.armed === i);
       }
     }
@@ -594,45 +697,251 @@
       + (isBall ? " · " + Math.min(BURST, BURST - state.burstLeft + 1) + "/" + BURST : "");
   }
 
-  function setZoom(on, x, y) {
-    state.zoom = on;
-    zoomer.classList.toggle("zoomed", on);
-    stagewrap.classList.toggle("zoomed", on);
-    zoomer.style.transformOrigin = ((x != null ? x : .5) * 100) + "% " + ((y != null ? y : .5) * 100) + "%";
-    zoomer.style.transform = on ? "scale(4)" : "none";
+  /* ---------- zoom and pan ----------
+     Screen-to-frame goes through toNorm rather than a pointer event's
+     offsetX: once the frame carries a transform and a pointer is captured,
+     offsetX is measured against whatever element the event settled on and no
+     longer answers "where in the frame did that land". */
+  var MIN_S = 1, MAX_S = 10, TAP_ZOOM = 4;
+
+  function base() {
+    var r = stagewrap.getBoundingClientRect();
+    return { x0: r.left + zoomer.offsetLeft, y0: r.top + zoomer.offsetTop,
+             ox: zoomer.offsetLeft, oy: zoomer.offsetTop,
+             w: zoomer.offsetWidth, h: zoomer.offsetHeight, sw: r.width, sh: r.height };
+  }
+  function stageCentre(b) { return [(b.x0 - b.ox) + b.sw / 2, (b.y0 - b.oy) + b.sh / 2]; }
+  // Panning stops at the edges of the frame rather than letting it drift off
+  // into the black: a lost frame is worse than a stiff one.
+  function clampView(b) {
+    var w = b.w * view.s, h = b.h * view.s;
+    if (w <= b.sw + 0.5) view.tx = 0;
+    else view.tx = Math.min(-b.ox, Math.max(b.sw - w - b.ox, view.tx));
+    if (h <= b.sh + 0.5) view.ty = 0;
+    else view.ty = Math.min(-b.oy, Math.max(b.sh - h - b.oy, view.ty));
+  }
+  var view = { s: 1, tx: 0, ty: 0 };
+  function applyView(animate) {
+    var b = base();
+    view.s = Math.min(MAX_S, Math.max(MIN_S, view.s));
+    clampView(b);
+    zoomer.classList.toggle("animate", !!animate);
+    zoomer.style.transform = "translate(" + view.tx.toFixed(2) + "px," + view.ty.toFixed(2) + "px) scale(" + view.s.toFixed(4) + ")";
+    zoomer.style.setProperty("--iz", (1 / view.s).toFixed(4));
+    state.zoom = view.s > 1.01;
+    $("zoomLevel").textContent = view.s.toFixed(1) + "\u00D7";
+    $("zoomIn").disabled = view.s >= MAX_S - 0.001;
+    $("zoomOut").disabled = view.s <= MIN_S + 0.001;
+  }
+  function resetView(animate) { view.s = 1; view.tx = 0; view.ty = 0; applyView(animate !== false); }
+  function toRaw(cx, cy) {
+    var b = base();
+    if (!b.w || !b.h) return null;
+    return [((cx - b.x0) - view.tx) / (b.w * view.s), ((cy - b.y0) - view.ty) / (b.h * view.s)];
+  }
+  function toNorm(cx, cy) {
+    var r = toRaw(cx, cy);
+    if (!r) return [0, 0];
+    return [Math.min(1, Math.max(0, r[0])), Math.min(1, Math.max(0, r[1]))];
+  }
+  // The frame rarely fills the stage, and the black around it is not part of
+  // any label: a tap there used to clamp onto the nearest edge of the frame
+  // and record a point nobody meant.
+  function inFrame(cx, cy) {
+    var r = toRaw(cx, cy);
+    return !!r && r[0] >= 0 && r[0] <= 1 && r[1] >= 0 && r[1] <= 1;
+  }
+  function toClient(u, v) {
+    var b = base();
+    return [b.x0 + view.tx + b.w * view.s * u, b.y0 + view.ty + b.h * view.s * v];
+  }
+  // Zoom about a point on the screen: whatever is under that point stays
+  // under it, which is what a pinch means and what a tap-to-zoom should do.
+  function zoomAt(s2, cx, cy, animate) {
+    var b = base();
+    if (!b.w || !b.h) return;
+    s2 = Math.min(MAX_S, Math.max(MIN_S, s2));
+    var u = ((cx - b.x0) - view.tx) / (b.w * view.s);
+    var v = ((cy - b.y0) - view.ty) / (b.h * view.s);
+    view.s = s2;
+    view.tx = (cx - b.x0) - s2 * b.w * u;
+    view.ty = (cy - b.y0) - s2 * b.h * v;
+    applyView(animate);
+  }
+  function zoomToNorm(s2, u, v, animate) {
+    var b = base(), c = stageCentre(b);
+    if (!b.w || !b.h) return;
+    view.s = Math.min(MAX_S, Math.max(MIN_S, s2));
+    view.tx = (c[0] - b.x0) - view.s * b.w * u;
+    view.ty = (c[1] - b.y0) - view.s * b.h * v;
+    applyView(animate !== false);
+  }
+  function zoomStep(f) { var b = base(), c = stageCentre(b); zoomAt(view.s * f, c[0], c[1], true); }
+
+  $("zoomIn").addEventListener("click", function () { zoomStep(1.6); });
+  $("zoomOut").addEventListener("click", function () { zoomStep(1 / 1.6); });
+  $("zoomLevel").addEventListener("click", function () { resetView(); });
+  window.addEventListener("resize", function () { applyView(false); });
+
+  /* ---------- gestures ----------
+     One finger on a mark drags it, one finger anywhere else pans, two fingers
+     pinch, and only a press that goes nowhere counts as a tap. The page reads
+     the pointers itself because the browser's own idea of a tap fires after a
+     pinch as well, which is how looking closer used to move the pin. */
+  var TAP_SLOP = 9;      // px of travel still counted as a tap
+  var GRAB_PX = 34;      // how near a finger lands to take hold of a mark
+  var PRED_PX = 14;      // tapping inside a suggested ring accepts it
+  var pts = {}, gest = null;
+
+  // What is under the finger is worked out from where the marks are on
+  // screen, not from the DOM: a mark is small, a fingertip is not, and the
+  // nearest one within reach is the one meant even when the tap misses it.
+  function pinAt(cx, cy) {
+    var q, best = null, bd = GRAB_PX, i, d;
+    if (state.mode === "ball") {
+      if (!state.pending) return null;
+      q = toClient(state.pending.x, state.pending.y);
+      d = Math.hypot(q[0] - cx, q[1] - cy);
+      return d <= GRAB_PX ? { type: "ball", dx: q[0] - cx, dy: q[1] - cy } : null;
+    }
+    for (i in state.pins) {
+      if (!Object.prototype.hasOwnProperty.call(state.pins, i)) continue;
+      q = toClient(state.pins[i][0], state.pins[i][1]);
+      d = Math.hypot(q[0] - cx, q[1] - cy);
+      if (d <= bd) { bd = d; best = { type: "pin", i: Number(i), dx: q[0] - cx, dy: q[1] - cy }; }
+    }
+    return best;
+  }
+  // A suggested ring is accepted by tapping inside it, so a ring near the
+  // point you are placing cannot swallow the tap meant for the point itself.
+  function predAt(cx, cy) {
+    if (!state.pred) return null;
+    // With a point armed the tap has to land inside the ring; with none armed
+    // the rings are the only thing to hit, so reach for them.
+    var best = null, bd = state.armed == null ? GRAB_PX : PRED_PX, i, r, d;
+    for (i in state.pred) {
+      if (!Object.prototype.hasOwnProperty.call(state.pred, i)) continue;
+      r = toClient(state.pred[i][0], state.pred[i][1]);
+      d = Math.hypot(r[0] - cx, r[1] - cy);
+      if (d <= bd) { bd = d; best = Number(i); }
+    }
+    return best;
+  }
+  // Dragging keeps the grip offset, so the mark does not jump to the middle
+  // of the fingertip the moment it starts to move.
+  function dragTo(hit, cx, cy) {
+    var n = toNorm(cx + (hit.dx || 0), cy + (hit.dy || 0));
+    if (hit.type === "ball") { state.pending = { x: n[0], y: n[1] }; }
+    else { state.pins[hit.i] = n; }
+    draw();
+    var node = hit.type === "ball" ? marker : zoomer.querySelector('.pin.set[data-i="' + hit.i + '"]');
+    if (node) node.classList.add("dragging");
+  }
+  function acceptPred(i) {
+    placePin(i, state.pred[i]);
+    // Say which point was taken. A ring accepted by accident is otherwise a
+    // silent wrong label, and a wrong label is worse than a missing one.
+    flash("took " + VN[i] + " — undo if that is wrong");
+    if (state.armed === i || state.armed == null) state.armed = nextUnplaced(i);
+    recomputePred();
     draw();
   }
-
-  /* ---------- tapping ---------- */
-  // offsetX/Y are in the element's own untransformed coordinate space, so the
-  // CSS zoom needs no correction. The video box carries the frame's exact
-  // aspect ratio, so there is no letterboxing to subtract.
-  vid.addEventListener("pointerdown", function (e) {
-    if (!state.match) return;
-    var w = vid.clientWidth, h = vid.clientHeight;
-    if (!w || !h) return;
-    var x = Math.min(1, Math.max(0, e.offsetX / w)), y = Math.min(1, Math.max(0, e.offsetY / h));
+  var flashTimer = null;
+  function flash(msg) {
+    state.flash = msg;
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(function () { state.flash = null; draw(); }, 1800);
+  }
+  function handleTap(cx, cy) {
+    if (!inFrame(cx, cy)) return;
+    var n = toNorm(cx, cy);
     if (state.mode === "ball") {
-      state.pending = { x: x, y: y };
-      if (!state.zoom) setZoom(true, x, y); else draw();
+      state.pending = { x: n[0], y: n[1] };
+      if (view.s < 1.5) zoomToNorm(TAP_ZOOM, n[0], n[1]); else draw();
       return;
     }
-    if (state.armed == null) { hint.textContent = "Pick a point below first"; hint.hidden = false; return; }
-    state.pins[state.armed] = [x, y];
+    // A tap inside someone else's ring accepts that ring; a tap inside the
+    // ring of the point being placed is a person saying where it really is,
+    // and a person beats a guess drawn from four rough points.
+    var i = predAt(cx, cy);
+    if (i != null && i !== state.armed) { acceptPred(i); return; }
+    if (state.armed == null) {
+      if (i != null) { acceptPred(i); return; }
+      hint.textContent = "Pick a point below first"; hint.hidden = false; return;
+    }
+    placePin(state.armed, n);
     state.armed = nextUnplaced(state.armed);
     recomputePred();
     draw();
+  }
+
+  stagewrap.addEventListener("pointerdown", function (e) {
+    if (!state.match) return;
+    if (e.target.closest && e.target.closest(".zoomctl, .stagemsg")) return;
+    pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ids = Object.keys(pts);
+    if (ids.length === 1) {
+      // Whether this is a tap, a drag of the mark under it or a pan of the
+      // frame is not decided here. Deciding at the moment of contact is what
+      // made a point near an already-placed one impossible to put down: the
+      // tap was eaten as a grab of its neighbour.
+      gest = { kind: "tap", id: e.pointerId, hit: pinAt(e.clientX, e.clientY), moved: false,
+               sx: e.clientX, sy: e.clientY, tx0: view.tx, ty0: view.ty };
+    } else if (ids.length === 2) {
+      var a = pts[ids[0]], b2 = pts[ids[1]];
+      gest = { kind: "pinch", ids: [ids[0], ids[1]], s0: view.s,
+               d0: Math.hypot(a.x - b2.x, a.y - b2.y),
+               mx: (a.x + b2.x) / 2, my: (a.y + b2.y) / 2 };
+    } else gest = null;
+    try { stagewrap.setPointerCapture(e.pointerId); } catch (err) { /* older engines */ }
+    e.preventDefault();
   });
-  zoomer.addEventListener("pointerdown", function (e) {
-    var t = e.target;
-    if (!t || !t.dataset || t.dataset.pred === undefined) return;
-    e.stopPropagation();
-    var i = Number(t.dataset.pred);
-    state.pins[i] = state.pred[i];
-    if (state.armed === i) state.armed = nextUnplaced(i);
-    recomputePred();
+  stagewrap.addEventListener("pointermove", function (e) {
+    if (!pts[e.pointerId]) return;
+    pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (!gest) return;
+    if (gest.kind === "pinch") {
+      var a = pts[gest.ids[0]], b2 = pts[gest.ids[1]];
+      if (!a || !b2) return;
+      var d = Math.hypot(a.x - b2.x, a.y - b2.y);
+      var mx = (a.x + b2.x) / 2, my = (a.y + b2.y) / 2;
+      view.tx += mx - gest.mx; view.ty += my - gest.my;
+      gest.mx = mx; gest.my = my;
+      if (gest.d0 > 12) zoomAt(gest.s0 * (d / gest.d0), mx, my, false); else applyView(false);
+      return;
+    }
+    if (e.pointerId !== gest.id) return;
+    var dx = e.clientX - gest.sx, dy = e.clientY - gest.sy;
+    if (!gest.moved) {
+      if (Math.hypot(dx, dy) <= TAP_SLOP) return;
+      gest.moved = true;
+      gest.kind = gest.hit ? "mark" : "pan";
+    }
+    if (gest.kind === "mark") { dragTo(gest.hit, e.clientX, e.clientY); return; }
+    view.tx = gest.tx0 + dx; view.ty = gest.ty0 + dy;
+    applyView(false);
+  });
+  function endPointer(e, cancelled) {
+    delete pts[e.pointerId];
+    try { stagewrap.releasePointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+    if (!gest) return;
+    // A finger lifted out of a pinch leaves the other one holding nothing:
+    // carrying on would swing the frame to wherever it happens to rest.
+    if (gest.kind === "pinch") { gest = null; return; }
+    if (e.pointerId !== gest.id) return;
+    if (!cancelled && gest.kind === "tap" && !gest.moved) handleTap(gest.sx, gest.sy);
+    if (gest.kind === "mark" && state.mode !== "ball") { recomputePred(); }
+    gest = null;
     draw();
-  }, true);
+  }
+  stagewrap.addEventListener("pointerup", function (e) { endPointer(e, false); });
+  stagewrap.addEventListener("pointercancel", function (e) { endPointer(e, true); });
+  // A mouse wheel or a trackpad pinch is the same intent on a desktop.
+  stagewrap.addEventListener("wheel", function (e) {
+    if (!state.match) return;
+    e.preventDefault();
+    zoomAt(view.s * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX, e.clientY, false);
+  }, { passive: false });
 
   /* ---------- moving through the match ---------- */
   function seekTo(t) {
@@ -662,7 +971,7 @@
     save();
     if (visible) state.last = { x: state.pending.x, y: state.pending.y };
     state.pending = null;
-    setZoom(false);
+    resetView(false);
     state.burstLeft--;
     if (state.burstLeft <= 0) jumpBall(); else seekTo(vid.currentTime + SAMPLE_STEP);
   }
@@ -694,8 +1003,8 @@
   }
   function jumpPitch() {
     var dur = vid.duration || 0;
-    state.pins = {}; state.armed = null; state.pred = null;
-    setZoom(false);
+    pitchReset();
+    resetView(false);
     if (!dur) { draw(); return; }
     var k = bag().kp;
     for (var i = 0; i < 60; i++) {
@@ -707,14 +1016,25 @@
 
   $("btnNext").addEventListener("click", function () { commitBall(true); });
   $("btnNoBall").addEventListener("click", function () { commitBall(false); });
-  $("btnBack").addEventListener("click", function () { state.pending = null; setZoom(false); seekTo(vid.currentTime - SAMPLE_STEP); });
+  $("btnBack").addEventListener("click", function () { state.pending = null; resetView(); seekTo(vid.currentTime - SAMPLE_STEP); });
   $("btnSavePitch").addEventListener("click", commitPitch);
   $("btnSkipFrame").addEventListener("click", jumpPitch);
   $("btnUndoPin").addEventListener("click", function () {
-    var ks = Object.keys(state.pins);
-    if (!ks.length) return;
-    delete state.pins[ks[ks.length - 1]];
+    var i = state.order.pop();
+    if (i === undefined) return;
+    delete state.pins[i];
+    state.armed = i;          // armed again, so putting it back is one tap
     recomputePred(); draw();
+  });
+  // A vertex you cannot find in this frame — under a player, off the edge,
+  // or paint that was never there — is set aside rather than left to come
+  // back as the next suggestion every time you place a neighbour. Fewer
+  // points is a fine frame; four is the minimum and the rest are a bonus.
+  $("btnCantSee").addEventListener("click", function () {
+    if (state.armed == null) return;
+    state.skipped[state.armed] = 1;
+    state.armed = nextUnplaced(state.armed);
+    draw();
   });
   $("modeBall").addEventListener("click", function () { setMode("ball"); });
   $("modePitch").addEventListener("click", function () { setMode("pitch"); });
@@ -722,8 +1042,8 @@
     if (state.mode === m) return;
     state.mode = m;
     state.pending = null; state.last = null;
-    state.pins = {}; state.armed = null; state.pred = null;
-    setZoom(false);
+    pitchReset();
+    resetView(false);
     if (m === "ball") jumpBall(); else jumpPitch();
     draw();
   }
@@ -731,8 +1051,8 @@
     var dur = vid.duration || 0;
     if (!dur) return;
     state.pending = null; state.last = null;
-    state.pins = {}; state.armed = null; state.pred = null;
-    setZoom(false);
+    pitchReset();
+    resetView(false);
     seekTo((Number(seek.value) / 1000) * dur);
   });
   document.addEventListener("keydown", function (e) {
@@ -742,7 +1062,13 @@
     if (e.key === " ") { e.preventDefault(); if (state.mode === "ball") commitBall(true); else commitPitch(); }
     else if (e.key === "n" || e.key === "N") { if (state.mode === "ball") { e.preventDefault(); commitBall(false); } }
     else if (e.key === "ArrowLeft") { if (state.mode === "ball") { e.preventDefault(); $("btnBack").click(); } }
-    else if (e.key === "z" || e.key === "Z") { setZoom(!state.zoom, state.pending ? state.pending.x : .5, state.pending ? state.pending.y : .5); }
+    else if (e.key === "z" || e.key === "Z") {
+      if (state.zoom) resetView();
+      else zoomToNorm(TAP_ZOOM, state.pending ? state.pending.x : .5, state.pending ? state.pending.y : .5);
+    }
+    else if (e.key === "+" || e.key === "=") { e.preventDefault(); zoomStep(1.6); }
+    else if (e.key === "-" || e.key === "_") { e.preventDefault(); zoomStep(1 / 1.6); }
+    else if (e.key === "u" || e.key === "U") { if (state.mode === "pitch") { e.preventDefault(); $("btnUndoPin").click(); } }
   });
 
   /* ---------- screens ---------- */
@@ -807,9 +1133,9 @@
   function openMatch(m) {
     state.match = m;
     state.pending = null; state.last = null; state.burstLeft = BURST;
-    state.pins = {}; state.armed = null; state.pred = null;
+    pitchReset();
     document.body.classList.add("working");
-    setZoom(false);
+    resetView(false);
     clearStageMsg();
     vid.src = m.url;
     stageMsg("Loading the match…", "The first frames take a moment to arrive.");
@@ -883,10 +1209,11 @@
           card.appendChild(s);
         });
       }
-      var z = el("button", "btn", state.zoom ? "Zoom is on" : "Zoom in for precision");
+      var z = el("button", "btn", state.zoom ? "Fit the whole frame" : "Zoom in for precision");
       z.setAttribute("aria-pressed", String(state.zoom));
       z.addEventListener("click", function () {
-        setZoom(!state.zoom, state.pending ? state.pending.x : .5, state.pending ? state.pending.y : .5);
+        if (state.zoom) resetView();
+        else zoomToNorm(TAP_ZOOM, state.pending ? state.pending.x : .5, state.pending ? state.pending.y : .5);
         closeSheet();
       });
       card.appendChild(z);
@@ -972,11 +1299,24 @@
         + "off screen or hidden, press <b>Not visible</b> — those count just as much, and they are what "
         + "stop the detector firing on a corner flag.";
       card.appendChild(a);
+      var g = el("p", "note");
+      g.innerHTML = "<b>Moving around the frame.</b> Pinch to zoom, drag to move, and the "
+        + "<b>&minus; / +</b> buttons do the same with one finger; the number between them fits the "
+        + "whole frame again. Neither moves a mark. To correct a mark, <b>drag it</b> — a tap somewhere "
+        + "else puts down a new one.";
+      card.appendChild(g);
       var b = el("p", "note");
       b.innerHTML = "<b>Pitch.</b> Tap a point on the little pitch, then tap that same point on the "
-        + "video. After four, the rest appear as dashed rings where they must be — tap one to accept it. "
+        + "video. After four, the rest appear as rings where they must be — tap inside one to accept it. "
         + "Four is the minimum to save, eight is better. Skip any frame without four visible.";
       card.appendChild(b);
+      var d = el("p", "note");
+      d.innerHTML = "<b>A point you cannot see</b> — under a player, off the edge, or paint that was "
+        + "never painted — press <b>can't see it</b> and it steps to the next one. Leaving it out is "
+        + "right: the model is taught which points are in a frame as much as where they are, so a "
+        + "guessed corner is a wrong label, while a missing one costs nothing. <b>Undo</b> takes back "
+        + "the point you placed last.";
+      card.appendChild(d);
       var c = el("p", "note");
       c.innerHTML = "Tagging the worn 19 Sept field matters more than the green one: the ball is found "
         + "43% of the time there against 73% on grass that looks like everything these models were "
