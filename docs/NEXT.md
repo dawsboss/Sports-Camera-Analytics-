@@ -163,6 +163,14 @@ The one thing worth building from scratch is the labelling loop, because
 nobody else's data looks like a youth match on a school field. That is
 `web/label.html` and `spike/labels/build_dataset.py`.
 
+Which public datasets can carry the pretraining, and which tagging they
+do not remove, is surveyed in `spike/evals/DATASETS.md`. In short:
+pitch keypoints can be pretrained on tens of thousands of labelled
+broadcast frames that already exist, so the tagging left there is only
+domain shift; no public dataset has a ball on worn turf, so that tagging
+is ours. That document is a survey and not a measurement, unlike the rest
+of `spike/evals/`.
+
 ## Next steps, in order
 
 1. **A ball detector fine-tuned on this footage.** Everything
@@ -183,7 +191,10 @@ nobody else's data looks like a youth match on a school field. That is
    penalty box drawn on open grass — so the data has to be ours.
    `spike/evals/PITCH_KEYPOINTS.md` has the evidence. Tagging a named
    point is the gesture the tagger already implements, so this is an
-   extension of `web/label.html`, not a new tool. Pitch dimensions must be measured
+   extension of `web/label.html`, not a new tool. Pretrain on SoccerNet's
+   calibration set rather than roboflow's 317 images: their named
+   polylines convert to the 32 named vertices arithmetically, which is
+   eighty times the data for no tagging (`spike/evals/DATASETS.md`). Pitch dimensions must be measured
    for each field first; the search assumes 105 x 68 and neither of these
    pitches is.
 3. **Player detection and tracking (M3)** can start now. Off-the-shelf
