@@ -106,7 +106,16 @@ function ok(name, cond, extra) { console.log((cond ? 'PASS  ' : 'FAIL  ') + name
   await page.waitForTimeout(300);
   ok('tapping the level fits the frame', (await page.evaluate(() => scale())) === 1);
 
-  const order = [5, 0, 24, 13, 1];
+  // The taps have to be where a camera would see those points: rings are
+  // drawn only where the taps agree on a pitch, and taps along a diagonal
+  // agree on none. A camera on the near touchline looking at the left box
+  // of a 100 x 60 m field — smaller than the page's 120 x 70, as both real
+  // fields are. The box's four corners fix everything inside it at any size.
+  const VX = { 4: [0, 5050], 1: [0, 950], 9: [2015, 950], 12: [2015, 5050], 0: [0, 0], 5: [0, 6000],
+               2: [0, 2084], 3: [0, 3916], 6: [550, 2084], 7: [550, 3916], 8: [1100, 3000],
+               10: [2015, 2084], 11: [2015, 3916] };
+  const seen = (i) => { const [X, Y] = VX[i], D = 7000 + (6000 - Y); return [0.5 + 2.5 * (X - 1000) / D, -0.3 + 9000 / D]; };
+  const order = [4, 1, 9, 12, 0];
   for (const i of order) {
     await page.evaluate((i) => {
       var d = document.getElementById('dg' + i).getBoundingClientRect();
@@ -114,12 +123,17 @@ function ok(name, cond, extra) { console.log((cond ? 'PASS  ' : 'FAIL  ') + name
       document.getElementById('dg' + i).dispatchEvent(e);
     }, i);
     const armed = await page.evaluate(() => document.getElementById('dgName').textContent);
-    await page.evaluate(([n]) => tapf(0.12 + n * 0.19, 0.2 + n * 0.14), [order.indexOf(i)]);
+    await page.evaluate(([u, v]) => tapf(u, v), seen(i));
     if (i === order[0]) ok('arming a diagram dot names it', /placing/.test(armed), armed);
   }
   let pins = await page.evaluate(() => [...document.querySelectorAll('.pin.set')].map(n => Number(n.dataset.i)).sort((a, b) => a - b));
-  ok('five points placed', pins.join(',') === '0,1,5,13,24', pins);
+  ok('five points placed', pins.join(',') === '0,1,4,9,12', pins);
   ok('predictions appear after four', (await page.evaluate(() => document.querySelectorAll('.pin.pred').length)) > 0);
+  // and each one is where the camera sees that point, not merely somewhere
+  const rings = await page.evaluate(() => [...document.querySelectorAll('.pin.pred')]
+    .map(n => [Number(n.dataset.i), parseFloat(n.style.left) / 100, parseFloat(n.style.top) / 100]));
+  const off = rings.map(([i, u, v]) => VX[i] ? Math.hypot(u - seen(i)[0], (v - seen(i)[1]) * 9 / 16) : 1);
+  ok('every ring sits on its point', rings.length > 0 && Math.max(...off) < 0.01, rings.map((r, k) => r[0] + ':' + off[k].toFixed(3)));
 
   // tapping a suggested ring takes that vertex
   const ring = await page.evaluate(() => {
@@ -158,14 +172,33 @@ function ok(name, cond, extra) { console.log((cond ? 'PASS  ' : 'FAIL  ') + name
   await page.click('#btnUndoPin');
   await page.click('#btnUndoPin');
   pins = await page.evaluate(() => [...document.querySelectorAll('.pin.set')].map(n => Number(n.dataset.i)).sort((a, b) => a - b));
-  ok('undo walks back the placements in order, not by vertex number', pins.join(',') === '0,5,13,24', pins);
+  ok('undo walks back the placements in order, not by vertex number', pins.join(',') === '1,4,9,12', pins);
   ok('undo re-arms the point it removed', /placing/.test(await page.evaluate(() => document.getElementById('dgName').textContent)));
 
   // --- "can't see it" sets a point aside
+  const dgArmed = await page.evaluate(() => document.getElementById('dgName').textContent);
   await page.click('#btnCantSee');
   const dgName = await page.evaluate(() => document.getElementById('dgName').textContent);
-  ok("can't see it moves on", !/corner L-bot/.test(dgName), dgName);
+  ok("can't see it moves on", /placing/.test(dgName) && dgName !== dgArmed, [dgArmed, dgName]);
   ok('the set-aside dot is marked on the diagram', (await page.evaluate(() => document.querySelectorAll('.dg-dot.skip').length)) === 1);
+
+  // Three points on the goal line and one off it fit a whole family of
+  // homographies exactly. The old fit drew rings from an arbitrary member.
+  // One tap is a finger's width out, as real ones are: exact taps made the
+  // old solver give up, which hid the problem here.
+  await page.click('#btnSkipFrame');
+  await page.waitForTimeout(50);
+  for (const i of [1, 2, 3, 9]) {
+    await page.evaluate((i) => {
+      var dot = document.getElementById('dg' + i), d = dot.getBoundingClientRect();
+      if (!dot.classList.contains('armed')) dot.dispatchEvent(new PointerEvent('pointerdown',
+        { clientX: d.left + d.width / 2, clientY: d.top + d.height / 2, bubbles: true, cancelable: true }));
+    }, i);
+    await page.evaluate(([u, v]) => tapf(u, v), [seen(i)[0] + (i === 2 ? 0.006 : 0), seen(i)[1]]);
+  }
+  pins = await page.evaluate(() => document.querySelectorAll('.pin.set').length);
+  ok('three on a line and one off draw no rings', pins === 4 &&
+    (await page.evaluate(() => document.querySelectorAll('.pin.pred').length)) === 0, pins);
 
   await b.close();
   console.log(fails.length ? '\nFAILED: ' + fails.join(', ') : '\nall good');

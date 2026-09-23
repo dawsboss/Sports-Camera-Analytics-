@@ -228,3 +228,39 @@ survey, and answers the question it left open:
   than copied, it is an involution, and the four halfway-line vertices
   map to themselves — so mirroring fixes the left/right imbalance and
   cannot help those four at all.
+
+## 0.1.7 — suggested rings only where the taps put them
+
+In pitch mode the suggested rings were often on the wrong grass, even after
+five or six points. A simulated camera on 60 x 42 to 110 x 68 m fields with
+a few pixels of tap error had 83% of rings more than 3% of the frame width
+off. Two causes, both in `web/label.html`:
+
+- **Three points on one line fix nothing off it.** Four points determine a
+  homography only if no three are collinear. The next-point walk went
+  nearest-first, and from a corner the nearest points are all on the goal
+  line, so it led straight into that case. The solver then returned an
+  arbitrary member of the family of exact fits, and every ring off that
+  line was drawn from it. The walk now skips a point on a line two placed
+  points already fix while there is another choice, and no rings are drawn
+  until the placed points actually determine the fit.
+- **The layout assumed a 120 x 70 m pitch.** Only the boxes, goal areas,
+  spot and circle are fixed by the laws; both real fields are smaller and
+  unmeasured. Box points predicted from box points were fine, but anything
+  past the box sat where a 120 x 70 pitch would have it. The fit is now
+  repeated for every length from 60 to 125 m and width from 45 to 80 m that
+  the taps do not rule out, and again with the taps shaken by a finger's
+  width. A ring is drawn only where all of those agree to within 3% of the
+  frame width. A ring the taps cannot place is not drawn at all: that costs
+  a tap, whereas a ring in the wrong place is a wrong label.
+
+Rings are no longer clamped onto the frame's edge when they fall just
+outside it. They are also dropped when the point is behind the camera,
+where the projection folds it back into the frame upside down.
+
+On the same simulation, 1–5% of rings are now more than 3% off, down from
+83%. Fewer are shown after four points (about a fifth of the visible ones),
+and more appear as the placed points spread past the box. The smoke test
+now places its taps where a camera would see them on a 100 x 60 m field.
+It checks that every ring lands on its point, and that three points on a
+line plus one draw no rings. The old page fails both checks.

@@ -44,9 +44,16 @@ flags and white socks.
 ## Pitch mode
 
 Tap a point on the little pitch at the bottom, then tap that same point on
-the video. After four points the page fits a homography and draws every
-remaining vertex as a ring where it must be — tap inside one to accept it.
-That is the difference between thirty taps a frame and about ten.
+the video. Once the placed points pin the view down, the page draws the
+remaining vertices as rings where they must be — tap inside one to accept
+it. That is the difference between thirty taps a frame and about ten.
+
+A ring appears only where the placed points decide it. Three points on one
+line (the goal line, say) decide nothing off that line, and the field's
+length and width are unknown, so four points in the penalty box predict the
+rest of the box but not the far corners. Place one point past the box, such
+as a corner or a point on the halfway line, and rings appear further out.
+A missing ring costs a tap; a ring in the wrong place would be a wrong label.
 
 Four points is the minimum to save and eight or more is better. Skip any
 frame where you cannot find four. Frames here are spread across the whole
