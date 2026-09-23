@@ -7,17 +7,22 @@ no services. Publishes aggregates to Firebase under a `soccer-manager`
 fixture; that app stays a static site that consumes JSON.
 
 Read `docs/SPEC.md` before changing anything structural. It is a copy of
-the living design doc, and its milestone order is the work order. Then
-read `docs/NEXT.md`: it says what two real Veo exports, a labelled
-broadcast set and the synthetic views measured, what each requested
-output needs, and the order of the next work. In short: M1 (classical
-registration) fails the gate on real footage and the measurements say
-why; a pretrained line network already does better and is the next
-registrar after fine-tuning; players are detected off the shelf; the
-ball is detected 43% of samples on worn turf and 73% on green, with a
-bridgeable median gap and an unbridgeable tail, so a fine-tuned ball
-detector is the gate for everything possession-shaped. M2 (the skeleton)
-is built. M3 onward is not started.
+the living design doc, and its milestone order is the work order, except
+that NEXT.md pulls M9's camera test and M10's click calibration forward
+(23 September). Then read `docs/NEXT.md`: it says what two real Veo
+exports, a labelled broadcast set and the synthetic views measured, what
+each requested output needs, and the order of the next work. In short:
+M1 (classical registration) fails the gate on real footage and the
+measurements say why; players are detected off the shelf; the ball is
+detected 43% of samples on worn turf and 73% on green, with a bridgeable
+median gap and an unbridgeable tail, and it is the gate for everything
+possession-shaped. M2 (the skeleton) is built. M3 onward is not started.
+**Since 23 September the work order is the camera first** (NEXT.md, "The
+camera first"). Registering a panning follow-cam from the paint on every
+frame is a problem a fixed camera does not have, so a cheap fixed-camera
+test comes before more registration or ball training; M3 starts now on
+the Veo footage; and the next follow-cam registrar is clicked keyframes
+plus tracking of the fixed background, not a fine-tuned line model.
 
 ## Required after every change
 
@@ -111,19 +116,25 @@ is built. M3 onward is not started.
   already finds on the worn field what the classical code cannot. It
   needs its BatchNorm epsilon set to 1e-3 before loading; without that it
   loads without complaint and predicts background everywhere. Its
-  mistakes on Veo footage are domain shift; fine-tuning on a few hundred
-  labelled frames of this footage is the next registrar, behind the same
-  `Registrar` interface, feeding the same hypothesis search.
+  mistakes on Veo footage are domain shift, which fine-tuning on labelled
+  frames of this footage would address. That route is parked behind
+  clicked keyframes plus background tracking, which cost less per field
+  (NEXT.md, "The camera first"). If it comes back, it goes behind the
+  same `Registrar` interface, feeding the same hypothesis search.
 
 ## Known gaps
 
 - M1 with the classical detector fails the gate on both real Veo exports
-  (1 and 0 of 60 frames) after every measured improvement. The path past
-  it is the learned detector above, fine-tuned; that needs labelled
-  frames from this footage, which do not exist yet, and the real pitch
-  dimensions of each field, which are not 105 x 68 and have not been
-  measured. One match's fix is not to be trusted until it holds on the
-  others; the spec's third, held-out match does not exist yet.
+  (1 and 0 of 60 frames) after every measured improvement. The next
+  attempt is clicked keyframes with the mapping carried between them by
+  tracking the fixed background, since the Veo rig itself never moves.
+  It needs the real pitch dimensions of each field, which are not
+  105 x 68 and have not been measured. One match's fix is not to be
+  trusted until it holds on the others; the spec's third, held-out match
+  does not exist yet.
+- **No fixed-camera footage exists.** Ball size, blur and coverage on a
+  static camera are arithmetic from the spec, not measurements. They are
+  the first thing to measure, and the one risk a static camera keeps.
 - **The ball is detected more often than an early measurement here
   claimed, and unevenly.** Over 240 consecutive samples per match with a
   COCO model: 43% on the worn olive field, 73% on the green one, median

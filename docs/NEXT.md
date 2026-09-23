@@ -181,53 +181,133 @@ domain shift; no public dataset has a ball on worn turf, so that tagging
 is ours. That document is a survey and not a measurement, unlike the rest
 of `spike/evals/`.
 
+## The camera first (23 September)
+
+After the first training run the question was whether what is left is
+simply more tagging, training and tuning. It is not, and the reason is
+where the effort has gone rather than how much of it there is.
+
+**Most of it went into a problem the product does not have.**
+Registering a panning, zooming virtual camera from the paint in each
+frame is what M1 measured, with a classical detector and then with
+learned ones. Every field brings its own paint and its own confusers —
+boards, a road, cars, white kits — which is why each new field feels
+like starting again, and why the line and keypoint models have so far
+needed labelled frames of the footage they meet. A fixed camera removes
+the problem rather than solving it: its mapping to the pitch is found
+once per placement by clicking a few landmarks (M10), and a new field
+costs minutes of clicking, not an evening of tags and a training run.
+The spec anticipated this: if the follow-cam pipeline is the wrong thing
+to optimise, stop and build the camera.
+
+| | On the follow-cam | On a fixed camera |
+| --- | --- | --- |
+| Registration | per frame, per field; fails the gate | once per placement, by hand |
+| Players | solved off the shelf | the same detector; tracks continuous, fragments rare |
+| Ball | COCO finds 43–73% of burst samples by field and run; median gap 1–2 samples, a blackout tail of 1.6–3 s | not measured; the one risk the camera keeps |
+| The stats Mode B cannot have | impossible | the headline set |
+
+**The ball is the risk a fixed camera keeps, and nobody has measured it.**
+At the spec's 35–50 px per metre a 20–22 cm ball is about 7–11 px across:
+the follow-cam's median ball, and the range of the public broadcast set
+stage one learned. That is arithmetic, not a measurement. Turf colour does
+not change with the camera, so the worn-field problem may come along. Two
+things point the other way, neither measured here. A fixed background
+lets a moving ball stand out by its motion as well as its look, which is
+the half of WASB that a panning camera destroyed. And stage one, the
+small-ball specialist, was trained on exactly the size range a fixed
+camera produces (`spike/evals/training_2026-09-23.md`). So the next ball
+measurement belongs on fixed footage, and tagging more follow-cam frames
+before that footage exists risks training for the wrong scale.
+
+**How products that do this work.** This is a survey, not a measurement.
+They own the camera. Veo and Pixellot sell the rig, so the lens, the
+height and the stitching are known, and the mapping to the pitch is set
+at install or in the app, not inferred per frame. Broadcast graphics such
+as the first-down line read the camera's pan and zoom from sensors on its
+head and calibrate once before the game. Their ball models are trained on
+footage from very many installs. None of them infers the camera from the
+paint on every frame of an arbitrary recording, from a few hundred
+labels, which is the problem M1 set itself.
+
+**Veo is itself a fixed camera.** Its hardware never moves; the follow-cam
+is a virtual crop of a panorama taken from one position. Two consequences:
+
+- To the extent the render is a pinhole view, which the registrar already
+  assumes, consecutive follow-cam frames are related by one homography
+  for the *whole* scene, not only the ground, because the view only turns
+  and zooms about one point. The road, the backstop and the tree line that
+  defeat the line detector are fixed features that anchor frame-to-frame
+  tracking. So the next follow-cam registrar is: click landmarks on a few
+  keyframes per match, carry the mapping between them by matching the
+  background, and re-anchor where drift shows. It sits inside
+  `FollowCamRegistrar`, returns `Registration`, and is scored by the same
+  M1 gate and `bench.py`; nothing is loosened.
+- If Veo offers the panoramic recording as a download, that recording is
+  a fixed camera already, and the Mode A path can be tried on it before
+  any rig exists. Not checked.
+
+`docs/SPEC.md` still orders M9 after M8. It is a copy of the living design
+doc, and changes when that does; until then, this section is the work
+order.
+
 ## Next steps, in order
 
-1. **A ball detector fine-tuned on this footage.** Everything
-   possession-shaped waits on closing the blackout stretches above. The
-   labels come from `web/label.html`, a phone page that plays the Veo
-   footage and records where you tap, and
-   `spike/labels/build_dataset.py`, which cuts the tagged frames and
-   writes them for training. Tag the frames where the ball is *not*
-   visible too: those are what stop a detector firing on a corner flag.
-   Train on the homelab GPU, and measure with `ball_recall.py` on the
-   held-out match, never the one trained on.
-
-   *First attempt, 2026-09-23* (`spike/evals/training_2026-09-23.md`):
-   public pretraining alone finds small distant balls COCO misses, but
-   nothing larger than 15 px; fine-tuning on 53 tags from one match made
-   a detector for that match, which on the other match fired on white
-   kit shirts. The tagging this step needs is several matches with
-   different kits and balls, and a size on each tag, not more of one.
-2. **A pitch keypoint model, not a line model.** Changed after reading
-   roboflow/sports: a model that emits 32 *named* pitch points removes
-   the naming search entirely, where a line model only feeds it. Adopt
-   their 32-vertex layout, pretrain on their public dataset, fine-tune on
-   frames tagged here. Community weights on that layout were tested on
-   both exports and are confidently wrong — keypoints in the sky, or a
-   penalty box drawn on open grass — so the data has to be ours.
-   `spike/evals/PITCH_KEYPOINTS.md` has the evidence. Tagging a named
-   point is the gesture the tagger already implements, so this is an
-   extension of `web/label.html`, not a new tool. Pretrain on SoccerNet's
-   calibration set rather than roboflow's 317 images: their named
-   polylines convert to the 32 named vertices arithmetically, which is
-   eighty times the data for no tagging (`spike/evals/DATASETS.md`).
-   Pitch dimensions must be measured for each field first; the search
-   assumes 105 x 68 and neither of these pitches is.
-3. **Player detection and tracking (M3)** can start now. Off-the-shelf
-   detection plus ByteTrack, filtered to the pitch by the grass mask so
-   spectators drop out. CPU is fine for evaluation; a full match needs
-   the GPU.
-4. **Identity (S4, S6):** kit-colour team split, then fragment linking
-   using stints from the minutes app. This is where the two systems meet.
-5. **Restarts and possession**, once 1 and 2 hold. Possession first, since
+1. **A fixed-camera test, before any rig.** This is M9's validation pulled
+   forward. A phone or action camera at 4K, as high as can be managed (a
+   mast, a stand, a building), ten to fifteen minutes of a match or a
+   training session, the whole pitch in frame, a fast shutter. Measure:
+   player height and ball size in pixels at the near and far touchlines,
+   blur on a struck ball, and whether one camera covers the surface. Run
+   what already exists on it: COCO players, COCO ball, stage one, and WASB,
+   which the first training run said was worth one more run on static
+   footage. Click the four corners, fit a homography by hand, and measure
+   its reprojection error. An afternoon, and it decides the lens, the
+   height, and whether one camera is enough.
+2. **Player detection and tracking (M3)** on the Veo footage, now.
+   Off-the-shelf detection plus ByteTrack, filtered to the pitch by the
+   grass mask so spectators drop out. CPU is fine for evaluation; a full
+   match needs the GPU. Nothing here waits on registration or the ball.
+3. **Identity (S4, S6), then a first review UI (M6).** Kit-colour team
+   split, then fragment linking using stints from the minutes app; this is
+   where the two systems meet. Review time is the criterion the spec says
+   decides whether this is worth continuing, and neither stage needs
+   registration.
+4. **Click calibration, then keyframe registration for the follow-cam.**
+   The click UI is M10's, and serves both modes: once per placement for a
+   fixed camera, a few keyframes per match for the follow-cam, with the
+   background tracking above in between. Measure each field's real
+   dimensions first; the search assumes 105 x 68 and neither pitch is.
+5. **The ball, on the footage the product will record.** If the
+   fixed-camera test shows the ball at the size the spec implies, start
+   from stage one and WASB there. Wherever follow-cam tagging continues,
+   what 23 September taught still holds: tags from several matches with
+   different kits and balls, not more of one; a size on every tag;
+   not-visible tags on frames full of white shirts; throw-ins and the ball
+   in hands. The first attempt is in `spike/evals/training_2026-09-23.md`.
+6. **Restarts and possession**, once 4 and 5 hold. Possession first, since
    it is ball-and-players only; then the stationary-ball test that finds
    restarts; then the restart type from where on the pitch it happened.
    Counts per type per team are the output a coach reads.
 
-Item 1 is the gate now, in the same sense M1 was: if the ball cannot be
-found reliably on this footage, the possession half of the wish list is
-not available from a follow-cam and the honest move is to say so.
+**Parked, with what would bring each back:**
+
+- **A pitch keypoint or line model** (the old second step). Each field
+  has so far been a new domain for it, and keyframe clicks cost less
+  than the labels. It returns if keyframe tracking cannot hold the gate
+  across a whole match. The evidence and the pretraining plan stay in
+  `spike/evals/PITCH_KEYPOINTS.md` and `spike/evals/DATASETS.md`.
+- **Fine-tuning the ball on one follow-cam match at a time.** 53 tags from
+  one match made a detector for that match, which fired on white shirts
+  on the other. It returns, with the tagging rules in step 5, if the
+  follow-cam stays the product's input for longer than planned.
+
+The ball is still the gate for everything possession-shaped, as it was.
+What changes is where it is measured: on the footage a fixed camera
+records. If that camera cannot find the ball reliably, the possession half
+of the wish list needs a different rig — higher, closer, or a second
+camera — and the fixed-camera test is where that shows, for the price of
+an afternoon.
 
 ## How to store the videos, and what matters more
 
