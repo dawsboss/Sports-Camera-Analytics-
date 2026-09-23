@@ -23,13 +23,18 @@ stop it firing on a corner flag or a white sock, so they are kept.
 
 The held-out match is never trained on. One match's fix is not a fix
 until it holds on footage it never saw, and `--holdout` is what keeps
-that honest.
+that honest. While only one match is tagged, `--holdout-window
+MATCHID=START:END` (minutes of video, either end open) holds out a
+stretch of it instead: different passages of play, light and end of the
+pitch, which is weaker than a separate match and far better than nothing.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
+import shutil
 from pathlib import Path
 
 import cv2
@@ -48,6 +53,27 @@ N_VERTICES = 32
 # are only part of the pitch and a box drawn tight around them would teach
 # the model that the pitch ends where the tagging did.
 KP_BOX_PAD = 0.04
+
+# A horizontal image flip mirrors the world about a vertical plane through
+# the camera: the camera stays on the same touchline, so `camera_side` is
+# untouched, and every pitch point goes to its mirror about the halfway
+# line, x -> LENGTH - x. On `pitch_keypoints.py:VERTICES` that is this
+# permutation (0-based, as Ultralytics wants it). Writing it into the pose
+# data.yaml is what lets Ultralytics swap the names when it mirrors a
+# frame; without it `fliplr` would teach that a left corner is a right one.
+# The four vertices on the halfway line map to themselves, so mirroring
+# evens out left against right but adds nothing for 13-16.
+FLIP_IDX = [24, 25, 26, 27, 28, 29, 22, 23, 21, 17, 18, 19, 20, 13, 14, 15,
+            16, 9, 10, 11, 12, 8, 6, 7, 0, 1, 2, 3, 4, 5, 31, 30]
+# A mirror applied twice is the identity, so a typo here almost certainly
+# breaks this; tests/test_build_dataset.py checks it against VERTICES too.
+assert sorted(FLIP_IDX) == list(range(N_VERTICES))
+assert all(FLIP_IDX[FLIP_IDX[i]] == i for i in range(N_VERTICES))
+
+# Frames this close outside a held-out window are dropped rather than
+# trained on. Tags come in bursts at 5 fps, and a burst cut in two by the
+# window edge would put near-identical frames on both sides of the split.
+WINDOW_GUARD_S = 10.0
 
 
 def load_tags(path: Path) -> dict:
@@ -69,6 +95,26 @@ def frames_of(entry: dict, kind: str) -> dict:
         if looks_flat:
             return entry
     return {}
+
+
+def tagged_frame(key: str, rec: dict, fps: float) -> int:
+    """The frame that was on screen when the tag was placed.
+
+    Tags from before the tagger's fix are keyed Math.round(currentTime *
+    29.97), but a paused video shows the frame whose interval contains
+    currentTime: the floor, at the true rate. Past mid-frame the key names
+    the frame after the one tapped, and on a fast zoomed pan that moves the
+    ball 10-18 px out of its 22 px box (measured on 20260919-flight: the
+    floor was the best-matching frame for 29 of 32 tags where it could be
+    told apart). Ball tags carry the time, so the floor is recoverable;
+    pitch tags do not, and keep their key, at most one frame late."""
+    idx = int(key)
+    t = rec.get("t") if isinstance(rec, dict) else None
+    if t is None or not fps:
+        return idx
+    shown = math.floor(float(t) / 1000.0 * fps + 1e-6)
+    # Anything further than one frame away is not this rounding; trust the key.
+    return shown if abs(shown - idx) <= 1 else idx
 
 
 def ball_line(rec: dict, w: int, h: int) -> str | None:
@@ -102,24 +148,67 @@ def pose_line(points: dict) -> str | None:
     return " ".join(parts)
 
 
-def cut(video: Path, tags: dict, kind: str, out: Path, split: str, prefix: str, quality: int) -> tuple[int, int]:
+def parse_window(text: str) -> tuple[str, float, float]:
+    """`MATCHID=START:END` in minutes of video, either end may be left
+    open. Returns the match id and the window in seconds."""
+    match_id, _, span = text.partition("=")
+    if not match_id or ":" not in span:
+        raise SystemExit(f"--holdout-window wants MATCHID=START:END in minutes, got {text!r}")
+    a, b = span.split(":", 1)
+    start = float(a) * 60.0 if a.strip() else 0.0
+    end = float(b) * 60.0 if b.strip() else float("inf")
+    if end <= start:
+        raise SystemExit(f"--holdout-window {text!r} holds out nothing")
+    return match_id, start, end
+
+
+def split_by_windows(tags: dict, fps: float, windows: list[tuple[float, float]],
+                     guard_s: float = WINDOW_GUARD_S) -> tuple[dict, dict]:
+    """(train, val) for one match's tags. Inside a window is val; within
+    `guard_s` of one is neither; everything else is train."""
+    train, val = {}, {}
+    for key, rec in tags.items():
+        t = int(key) / fps
+        if any(a <= t < b for a, b in windows):
+            val[key] = rec
+        elif not any(a - guard_s <= t < b + guard_s for a, b in windows):
+            train[key] = rec
+    return train, val
+
+
+def video_fps(video: Path) -> float:
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise SystemExit(f"cannot open {video}")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+    if not fps or fps <= 0:
+        raise SystemExit(f"{video} does not report a frame rate; cannot place a time window in it")
+    return fps
+
+
+def cut(video: Path, tags: dict, kind: str, out: Path, split: str, prefix: str,
+        quality: int) -> tuple[int, int, int]:
     """Write frames and labels for one match and one kind. Returns
-    (frames written, frames carrying a positive label)."""
+    (frames written, frames carrying a positive label, frames moved off
+    their key by `tagged_frame`)."""
     if not tags:
-        return 0, 0
+        return 0, 0, 0
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         raise SystemExit(f"cannot open {video}")
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
     img_dir = out / kind / "images" / split
     lbl_dir = out / kind / "labels" / split
     img_dir.mkdir(parents=True, exist_ok=True)
     lbl_dir.mkdir(parents=True, exist_ok=True)
 
-    written = positive = 0
+    written = positive = moved = 0
     for key in sorted(tags, key=lambda k: int(k)):
-        idx = int(key)
+        idx = tagged_frame(key, tags[key], fps) if kind == "ball" else int(key)
+        moved += idx != int(key)
         line = ball_line(tags[key], w, h) if kind == "ball" else pose_line(tags[key])
         if kind == "pitch" and line is None:
             continue                     # fewer than four points is not a usable frame
@@ -133,7 +222,7 @@ def cut(video: Path, tags: dict, kind: str, out: Path, split: str, prefix: str, 
         written += 1
         positive += line is not None
     cap.release()
-    return written, positive
+    return written, positive, moved
 
 
 def main() -> None:
@@ -144,6 +233,9 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--holdout", action="append", default=[], metavar="MATCHID",
                     help="match ids to put in val/ and never train on; repeatable")
+    ap.add_argument("--holdout-window", action="append", default=[], metavar="MATCHID=START:END",
+                    help="minutes of one match to put in val/, either end open (50: is 50 min "
+                         "to the end); for when only one match is tagged; repeatable")
     ap.add_argument("--kinds", default="ball,pitch")
     ap.add_argument("--quality", type=int, default=92)
     args = ap.parse_args()
@@ -155,24 +247,60 @@ def main() -> None:
         k, v = pair.split("=", 1)
         videos[k] = Path(v)
 
+    windows: dict[str, list[tuple[float, float]]] = {}
+    for text in args.holdout_window:
+        match_id, start, end = parse_window(text)
+        windows.setdefault(match_id, []).append((start, end))
+    both = sorted(set(windows) & set(args.holdout))
+    if both:
+        raise SystemExit(f"{both} given to both --holdout and --holdout-window; pick one")
+
     matches = load_tags(args.tags)
     missing = [m for m in matches if m not in videos]
     if missing:
         print(f"no video given for {missing}, skipping those")
+    unknown = sorted(set(windows) - set(matches))
+    if unknown:
+        raise SystemExit(f"--holdout-window names {unknown}, which the tags do not contain")
 
     kinds = [k for k in args.kinds.split(",") if k]
+    # Frames left over from a previous build would keep their old split, so
+    # a re-run that moves a frame into val would leave its twin in train.
+    # These two trees are this script's output and nothing else's.
+    for kind in kinds:
+        for sub in ("images", "labels"):
+            shutil.rmtree(args.out / kind / sub, ignore_errors=True)
+
     totals = {k: {"train": [0, 0], "val": [0, 0]} for k in kinds}
     for match_id, entry in matches.items():
         if match_id not in videos:
             continue
-        split = "val" if match_id in args.holdout else "train"
+        fps = video_fps(videos[match_id]) if match_id in windows else 0.0
         for kind in kinds:
             tags = frames_of(entry, kind if kind == "ball" else "kp")
-            n, p = cut(videos[match_id], tags, kind, args.out, split, match_id, args.quality)
-            if n:
-                totals[kind][split][0] += n
-                totals[kind][split][1] += p
-                print(f"{match_id} {kind} -> {split}: {n} frames, {p} with a label")
+            if match_id in args.holdout:
+                parts = {"val": tags}
+            elif match_id in windows:
+                train, val = split_by_windows(tags, fps, windows[match_id], WINDOW_GUARD_S)
+                parts = {"train": train, "val": val}
+                dropped = len(tags) - len(train) - len(val)
+                if dropped:
+                    print(f"{match_id} {kind}: {dropped} tags within {WINDOW_GUARD_S:g}s of the "
+                          f"held-out window dropped from both sides")
+            else:
+                parts = {"train": tags}
+            if "val" in parts:
+                # Val is scored against what a person tapped, never against
+                # what propagate.py filled in from those taps.
+                parts["val"] = {k: v for k, v in parts["val"].items()
+                                if not (isinstance(v, dict) and v.get("src") == "prop")}
+            for split, part in parts.items():
+                n, p, moved = cut(videos[match_id], part, kind, args.out, split, match_id, args.quality)
+                if n:
+                    totals[kind][split][0] += n
+                    totals[kind][split][1] += p
+                    print(f"{match_id} {kind} -> {split}: {n} frames, {p} with a label"
+                          + (f", {moved} cut one frame off their key (the frame on screen)" if moved else ""))
 
     print()
     for kind in kinds:
@@ -186,29 +314,31 @@ def main() -> None:
                 f"path: {root}\ntrain: images/train\nval: images/val\nnames:\n  0: ball\n"
             )
         else:
-            # No horizontal-flip augmentation for the pitch. A pitch is
-            # symmetric under a half turn, so a mirrored image is a valid
-            # pitch with every left/right name swapped, and the same
-            # ambiguity is why FollowCamConfig.camera_side exists as a
-            # stated convention rather than something detected.
+            # flip_idx is what makes horizontal flips sound here: Ultralytics
+            # swaps each keypoint for its mirror when it flips the frame.
             (args.out / kind / "data.yaml").write_text(
                 f"path: {root}\ntrain: images/train\nval: images/val\n"
-                f"kpt_shape: [{N_VERTICES}, 3]\nnames:\n  0: pitch\n"
+                f"kpt_shape: [{N_VERTICES}, 3]\nflip_idx: {FLIP_IDX}\nnames:\n  0: pitch\n"
             )
         print(f"{kind}: train {t['train'][0]} frames ({t['train'][1]} labelled), "
               f"val {t['val'][0]} ({t['val'][1]} labelled) -> {args.out / kind / 'data.yaml'}")
         if t["val"][0] == 0:
-            print(f"  nothing held out for {kind}; pass --holdout or the score will flatter itself")
+            print(f"  nothing held out for {kind}; pass --holdout or --holdout-window, "
+                  f"or the score will flatter itself")
 
-    print("\nTrain on the homelab GPU:")
+    # Stage two of docs/TRAINING.md: start from the public-data pretrain,
+    # low lr0 so it is not erased. Ball: no mosaic and a narrow scale range,
+    # because both shrink an 11 px ball to 5 px.
+    print("\nFine-tune (stage two of docs/TRAINING.md) on the GPU:")
     if "ball" in kinds:
-        print(f"  yolo detect train model=yolo11s.pt data={args.out / 'ball' / 'data.yaml'} imgsz=1920 epochs=100")
+        print(f"  yolo detect train model=runs/detect/ball_pre/weights/best.pt data={args.out / 'ball' / 'data.yaml'} "
+              f"imgsz=1920 epochs=80 lr0=0.001 patience=20 mosaic=0.0 scale=0.2 name=ball_ft")
     if "pitch" in kinds:
-        print(f"  yolo pose train model=yolo11s-pose.pt data={args.out / 'pitch' / 'data.yaml'} "
-              f"imgsz=1280 epochs=200 fliplr=0.0")
-    print("\nThen measure on the held-out match, never the trained one:")
-    print("  python spike/evals/ball_recall.py --video <held-out> --weights runs/detect/train/weights/best.pt")
-    print("  python spike/evals/pitch_keypoints.py --weights runs/pose/train/weights/best.pt --video <held-out> --out out/")
+        print(f"  yolo pose train model=runs/pose/pitch_pre/weights/best.pt data={args.out / 'pitch' / 'data.yaml'} "
+              f"imgsz=1280 epochs=200 lr0=0.001 name=pitch_ft")
+    print("\nThen measure on footage it never trained on:")
+    print("  python spike/evals/ball_recall.py --video <held-out> --weights runs/detect/ball_ft/weights/best.pt")
+    print("  python spike/evals/pitch_keypoints.py --weights runs/pose/pitch_ft/weights/best.pt --video <held-out> --out out/")
 
 
 if __name__ == "__main__":

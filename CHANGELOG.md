@@ -228,3 +228,82 @@ survey, and answers the question it left open:
   than copied, it is an involution, and the four halfway-line vertices
   map to themselves — so mirroring fixes the left/right imbalance and
   cannot help those four at all.
+
+## 0.1.7 — the first training run, on a gaming PC, and what it found first
+
+The GPU guide run end to end for the first time, on a Windows desktop with
+an RTX 3090 Ti. Most of what it found was not about the models: a timing
+bug in the tagger, three training defaults that silently undo a small
+fine-tune, and a card that pages to system RAM instead of failing. The
+measurements are in `spike/evals/training_2026-09-23.md`.
+
+Brought over from `claude/ragging-data-training-hep16d`, which drafted
+them alongside the guide that 0.1.6 superseded:
+
+- **`spike/labels/fetch_public.py`** pulls the two CC-BY-4.0 Hugging Face
+  mirrors of Roboflow's pitch-keypoint (317 images) and ball (1,237)
+  datasets, which need no account, and refuses to continue if the pitch
+  set's keypoint order ever stops matching `VERTICES`.
+- **`spike/labels/tags.json`**, the first Sideline Tagger export: 94 ball
+  samples in ten bursts and 12 pitch-keypoint frames, all from
+  `20260919-flight`. Coordinates only.
+
+New:
+
+- **The tagger keyed about half of all ball tags to the frame after the
+  one tapped.** It stored `Math.round(currentTime × 29.97)`; a paused
+  video shows the frame whose interval contains `currentTime`, which is
+  the floor, at 30000/1001. Invisible on a slow passage; on a fast zoomed
+  pan the ball sat 10–18 px outside its 22 px box. Measured, not
+  reasoned: `spike/labels/check_tag_timing.py` finds the best-matching
+  frame around each tag with a detector, and `floor(t × fps)` was it for
+  29 of the 32 tags where frames could be told apart. The tagger now
+  keys by the floor at the exact rate; `build_dataset.py` recovers the
+  right frame for existing ball tags from their stored time (52 of 94
+  moved). Pitch tags store no time and stay at most a frame late.
+- **`build_dataset.py`** writes the pose `flip_idx` (checked against
+  `VERTICES` and against `fetch_public.py` in `tests/test_build_dataset.py`,
+  so `fliplr` is sound for the pitch), takes `--holdout-window
+  MATCHID=START:END` so a single tagged match can still be scored on a
+  stretch it never trained on, drops tags within ten seconds of that
+  window from both sides, clears its previous output so no frame keeps an
+  old split, and keeps propagated tags out of val.
+- **`spike/labels/propagate.py`** fills the five frames between two
+  neighbouring ball tags by template matching forward from one tap and
+  backward from the other, keeping only frames where the two agree
+  within 3 px. On `20260919-flight`: 107 of 400 frames filled, two of
+  those visibly wrong on the contact sheet (both taps off the same way,
+  so both directions agreed on the same wrong spot) and deleted by hand.
+  Agreement does not catch shared tap error; the sheet does.
+- **`spike/evals/ball_on_tags.py`** scores a detector against held-out
+  tags: is its most confident detection within 20 px of the tap? That is
+  the question `ball_recall.py` cannot ask, and the one a detector
+  fine-tuned on ninety boxes most needs asked. `ball_recall.py --sheet`
+  writes a crop of every detection it counted as found, so that number
+  can be checked by eye.
+- **`spike/evals/wasb_ball.py`** runs WASB's released small-ball weights
+  cold. On its own static-camera ISSIA test clip it finds the ball in 11
+  of 13 frames; on our 40 held-out tags, in 0, with or without motion.
+  The heatmap at our ball is ~0.007 where WASB's threshold is 0.5. The
+  tagging plan stands.
+- **`docs/TRAINING.md`** now says what actually ran: native Windows
+  instead of WSL; `batch=6` for the ball at 1920 on 24 GB (at `batch=8`
+  the driver paged 7.5 GB into system RAM and training ran at a quarter
+  speed); `optimizer=auto` ignores `lr0`, `nbs=64` makes 53 images about
+  one update an epoch, and warmup runs 100 iterations at a bias rate of
+  0.1, so stage two names its optimizer, sets `nbs` to `batch` and turns
+  warmup off; weights land in `runs/detect/<name>/`, not where the old
+  commands said. The public ball set's balls measure 11.7 px median
+  against our 11, so stage one needs no scale correction. And no
+  `cache=ram` on Windows: stage one was stopped at epoch 41 of 60 for
+  running the 64 GB machine out of memory with it on, most likely a copy
+  of the 5.8 GB cache per spawned dataloader worker, for no speed gain on
+  a GPU-bound run.
+- **The green 20 Sept match is played with an orange ball**, the worn
+  19 Sept one with a white ball, so `docs/NEXT.md`'s 73%-against-43% is
+  ball colour as well as field condition; a caveat now says so there.
+  The green match stays the never-trained-on test, but until a match
+  with an orange ball is tagged it tests colour transfer as well.
+- **Not yet measured:** the fine-tunes and the pitch. Stage one reached
+  mAP50 0.94 on the public set's own val split before it was stopped;
+  nothing trained has been scored on our footage yet.

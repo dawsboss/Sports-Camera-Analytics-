@@ -75,6 +75,16 @@ sixteen bursts on the two matches:
   already knows; a white ball on patchy brown turf is not. So the worn
   footage is the *valuable* footage to tag, and a model tuned only on
   easy matches will disappoint on exactly the ones that need help.
+
+  *Caveat, found on the first training run:* the 20 Sept match is played
+  with an **orange** ball (six of the eight confident detections across
+  it; the other two are white spare balls, one lying on the sideline).
+  So 73% against 43% is an orange ball on green against a white ball on
+  olive, and ball colour is confounded with field condition. It also
+  means the green match, as the never-trained-on test, asks a model tuned
+  on white-ball tags to transfer colour as well as turf; and that
+  `ball_recall.py`'s "found" counts spare balls on the touchline.
+  `spike/evals/training_2026-09-23.md`.
 - **The ball is 11 px across.** That is small enough to explain the
   misses without anything being wrong, and it sets the box size the
   training set uses (`build_dataset.py` writes 22 px, which the

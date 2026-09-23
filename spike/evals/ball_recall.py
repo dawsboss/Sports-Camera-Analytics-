@@ -17,6 +17,11 @@ across that.
 `--weights` takes any Ultralytics model. With a COCO model pass
 `--coco-ball` so it looks for class 32 ("sports ball"); a model fine-tuned
 on this footage has ball as its only class and needs no flag.
+
+"Found" here means something cleared the floor, not that it was the ball;
+nothing on untagged footage can say which. `--sheet out.jpg` writes a crop
+of every accepted detection so that can be checked by eye, and
+`ball_on_tags.py` asks the question properly where tags exist.
 """
 
 from __future__ import annotations
@@ -28,8 +33,18 @@ import cv2
 import numpy as np
 
 
-def burst(model, cap, start_frame: int, n: int, step: int, imgsz: int, conf: float, cls):
-    """Returns one (confidence, x, y, width) per sample, zeros where nothing."""
+def crop_at(frame, x: float, y: float, label: str, half: int = 40, scale: int = 2):
+    pad = cv2.copyMakeBorder(frame, half, half, half, half, cv2.BORDER_CONSTANT)
+    t = pad[int(y):int(y) + 2 * half, int(x):int(x) + 2 * half]
+    t = cv2.resize(t, (2 * half * scale, 2 * half * scale), interpolation=cv2.INTER_NEAREST)
+    cv2.putText(t, label, (2, 13), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+    return t
+
+
+def burst(model, cap, start_frame: int, n: int, step: int, imgsz: int, conf: float, cls,
+          crops: list | None = None, accept: float = 1.0):
+    """Returns one (confidence, x, y, width) per sample, zeros where nothing.
+    Appends a crop round each detection at or above `accept` to `crops`."""
     out = []
     for k in range(n):
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame + k * step)
@@ -45,6 +60,8 @@ def burst(model, cap, start_frame: int, n: int, step: int, imgsz: int, conf: flo
         if len(c):
             i = int(np.argmax(c))
             out.append((float(c[i]), float((b[i, 0] + b[i, 2]) / 2), float((b[i, 1] + b[i, 3]) / 2), float(b[i, 2] - b[i, 0])))
+            if crops is not None and c[i] >= accept:
+                crops.append(crop_at(frame, out[-1][1], out[-1][2], f"{start_frame + k * step} {c[i]:.2f}"))
         else:
             out.append((0.0, 0.0, 0.0, 0.0))
     return out
@@ -77,6 +94,7 @@ def main() -> None:
     ap.add_argument("--conf", type=float, default=0.05, help="detector floor; --accept is the one that counts")
     ap.add_argument("--accept", type=float, default=0.25, help="confidence at which a detection is believed")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--sheet", type=Path, help="write a contact sheet of every accepted detection here")
     args = ap.parse_args()
 
     from ultralytics import YOLO
@@ -95,8 +113,10 @@ def main() -> None:
     all_gaps: list[int] = []
     hits = seen = 0
     widths: list[float] = []
+    crops: list | None = [] if args.sheet else None
     for s in starts:
-        samples = burst(model, cap, int(s), args.burst, step, args.imgsz, args.conf, 32 if args.coco_ball else None)
+        samples = burst(model, cap, int(s), args.burst, step, args.imgsz, args.conf, 32 if args.coco_ball else None,
+                        crops, args.accept)
         g = gaps_of(samples, args.accept)
         h = sum(1 for x in samples if x[0] >= args.accept)
         widths += [x[3] for x in samples if x[0] >= args.accept]
@@ -115,6 +135,13 @@ def main() -> None:
               f"({max(all_gaps)/args.sample_fps:.1f}s at {args.sample_fps:g} fps)")
     if widths:
         print(f"detected ball width: median {np.median(widths):.0f}px, range {min(widths):.0f}-{max(widths):.0f}px")
+    if crops:
+        cols = 16
+        crops += [np.zeros_like(crops[0])] * (-len(crops) % cols)
+        sheet = np.vstack([np.hstack(crops[i:i + cols]) for i in range(0, len(crops), cols)])
+        args.sheet.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(args.sheet), sheet, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        print(f"accepted detections, for checking by eye: {args.sheet}")
     print("\nA gap of 1-2 samples is bridged by a tracker. A gap past about 5 is not.")
 
 

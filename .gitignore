@@ -13,7 +13,10 @@ spike/out/
 *.mov
 *.parquet
 .env
-# Model weights are downloaded, never committed.
+# Model weights are downloaded, never committed; training runs and eval
+# overlays are regenerated from them.
+runs/
+out/
 *.pt
 *.pth
 *.onnx
