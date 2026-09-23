@@ -161,3 +161,70 @@ Tagging on a phone was fighting the person doing it. Everything here is in
 `web/tagger.smoke.js` is new: Playwright driving the page in a real
 Chromium, asserting the above. It is not part of `pytest` — none of it is
 reachable without a browser — and `pytest` stays what CLAUDE.md says it is.
+
+## 0.1.6 — which public datasets replace tagging, and which do not
+
+`spike/evals/DATASETS.md` is new, and is a survey rather than a
+measurement: it is the first file in that directory whose claims come
+from other people's papers instead of our footage, and it says so.
+
+- **Pitch keypoints can be pretrained for free.** SoccerNet's
+  calibration set is ~25.5k frames with every line and circle named, and
+  a named vertex is the intersection of two named segments, so the
+  conversion to the 32-point layout is arithmetic. That is eighty times
+  roboflow's 317 images for no tagging, and it changes what step 2 of
+  `docs/NEXT.md` asks for: only enough worn-field frames to shift a
+  domain, not several hundred from nothing.
+- **No public dataset has a ball on worn turf.** SoccerNet-GSR removed
+  the ball deliberately; SoccerTrack and TeamTrack annotate players;
+  ball action spotting is timestamps, not boxes; ISSIA is a static-camera
+  ball set on a Serie A pitch. All of it is pristine professional turf,
+  which is the 73% case we already pass. The 43% case stays ours to tag.
+- **Auto-annotating our frames with community models was already tried
+  and is the wrong shape anyway.** Both keypoint models put points in the
+  sky, and the fine-tuned ball model drew 33-59 px boxes around an 11 px
+  ball. The general reason: auto-labelling yields labels where the model
+  already works, and the frames worth labelling are the ones where it
+  does not.
+- **Four things that do cut the tagging** are written down instead:
+  pretraining as above, tracker propagation across a burst (the median
+  gap is one to two samples), hard negatives mined for free from the
+  frames already tagged "not visible", and copy-paste of balls cropped
+  from the green match onto worn-field frames at the measured 6-39 px.
+- **An architecture worth one evaluation before tagging for YOLO:**
+  heatmap-over-consecutive-frames small-ball detectors (WASB, FootAndBall,
+  DeepBall) are built for a ball this size, and use the temporal
+  structure that our burst measurement says is there. Scored with
+  `ball_recall.py` over the same bursts or the number means nothing.
+
+`docs/TRAINING.md` — the GPU training guide drafted separately, on
+`claude/ragging-data-training-hep16d` — gains what follows from the
+survey, and answers the question it left open:
+
+- **Pretrain the pitch model on SoccerNet's calibration set**, not only
+  on the 317-image mirror. Twenty-eight of our 32 vertices are
+  intersections of its named segments; the two penalty spots are not
+  lines and the two circle extremes need an ellipse fit, so those four
+  are written `0 0 0` and left to our own tags.
+- **Check the public ball set's box sizes before using it as stage one.**
+  Ours is 11 px. A stage one full of 40 px balls teaches a scale prior
+  that stage two has to unlearn; match the pixel size by choosing
+  `imgsz`, not the resolution.
+- **`mosaic=0.0` and `scale=0.2` for the ball.** Mosaic tiles four images
+  into one frame and halves every object's linear size, and the default
+  `scale` can halve it again — harmless for a 60 px person, fatal for an
+  11 px ball. And not `freeze`: the shift here is grass colour and faint
+  paint, which lives in the early layers that freezing would pin.
+- **Hold out by time, not only by match, while there are two matches.**
+  Holding out the green field measures the case we already pass; holding
+  out the worn field leaves no worn-turf training data at all. Split the
+  worn match into tagged and held-out halves until a third match exists.
+- **Quote the gap distribution, not mAP.** A box six pixels off centre
+  scores near-zero IoU and is a perfectly good ball for possession and
+  restarts.
+- **`flip_idx` resolved.** An image mirror moves the camera to a mirrored
+  point on the same touchline, so `camera_side` is untouched and the
+  labels permute by `x -> LENGTH - x`. Derived from `VERTICES` rather
+  than copied, it is an involution, and the four halfway-line vertices
+  map to themselves — so mirroring fixes the left/right imbalance and
+  cannot help those four at all.
