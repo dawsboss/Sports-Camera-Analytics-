@@ -194,9 +194,9 @@ of `spike/evals/`.
    extension of `web/label.html`, not a new tool. Pretrain on SoccerNet's
    calibration set rather than roboflow's 317 images: their named
    polylines convert to the 32 named vertices arithmetically, which is
-   eighty times the data for no tagging (`spike/evals/DATASETS.md`). Pitch dimensions must be measured
-   for each field first; the search assumes 105 x 68 and neither of these
-   pitches is.
+   eighty times the data for no tagging (`spike/evals/DATASETS.md`).
+   Pitch dimensions must be measured for each field first; the search
+   assumes 105 x 68 and neither of these pitches is.
 3. **Player detection and tracking (M3)** can start now. Off-the-shelf
    detection plus ByteTrack, filtered to the pitch by the grass mask so
    spectators drop out. CPU is fine for evaluation; a full match needs
