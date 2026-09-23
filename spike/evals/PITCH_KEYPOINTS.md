@@ -58,9 +58,13 @@ the signature of a model far outside its training distribution.
    gesture as tagging the ball, against a list of point names instead of
    one. That is a small extension, not a new tool, and it is what
    unblocks registration.
-4. **Their datasets need a free Roboflow account** (the Universe links
-   return 401/403 unauthenticated). Worth getting: pretraining on their
-   images means far fewer of ours need tagging.
+4. **Their datasets no longer need a Roboflow account.** The Universe
+   links still return 401/403 unauthenticated, but CC-BY-4.0 mirrors of
+   both the pitch and ball projects sit on Hugging Face and download
+   anonymously; `spike/labels/fetch_public.py` takes them. Their keypoint
+   order was checked against `VERTICES` here and matches at all 32, so
+   pretraining on their images is a drop-in and far fewer of ours need
+   tagging. `docs/TRAINING.md` has the recipe.
 
 ## Also worth taking from that project
 

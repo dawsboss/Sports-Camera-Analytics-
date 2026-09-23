@@ -264,3 +264,148 @@ and more appear as the placed points spread past the box. The smoke test
 now places its taps where a camera would see them on a 100 x 60 m field.
 It checks that every ring lands on its point, and that three points on a
 line plus one draw no rings. The old page fails both checks.
+
+## 0.1.8 — the first training run, on a gaming PC, and what it found first
+
+The GPU guide run end to end for the first time, on a Windows desktop with
+an RTX 3090 Ti. Most of what it found was not about the models: a timing
+bug in the tagger, three training defaults that silently undo a small
+fine-tune, and a card that pages to system RAM instead of failing. The
+measurements are in `spike/evals/training_2026-09-23.md`.
+
+Brought over from `claude/ragging-data-training-hep16d`, which drafted
+them alongside the guide that 0.1.6 superseded:
+
+- **`spike/labels/fetch_public.py`** pulls the two CC-BY-4.0 Hugging Face
+  mirrors of Roboflow's pitch-keypoint (317 images) and ball (1,237)
+  datasets, which need no account, and refuses to continue if the pitch
+  set's keypoint order ever stops matching `VERTICES`.
+- **`spike/labels/tags.json`**, the first Sideline Tagger export: 94 ball
+  samples in ten bursts and 12 pitch-keypoint frames, all from
+  `20260919-flight`. Coordinates only.
+
+New:
+
+- **The tagger keyed about half of all ball tags to the frame after the
+  one tapped.** It stored `Math.round(currentTime × 29.97)`; a paused
+  video shows the frame whose interval contains `currentTime`, which is
+  the floor, at 30000/1001. Invisible on a slow passage; on a fast zoomed
+  pan the ball sat 10–18 px outside its 22 px box. Measured, not
+  reasoned: `spike/labels/check_tag_timing.py` finds the best-matching
+  frame around each tag with a detector, and `floor(t × fps)` was it for
+  29 of the 32 tags where frames could be told apart. The tagger now
+  keys by the floor at the exact rate; `build_dataset.py` recovers the
+  right frame for existing ball tags from their stored time (52 of 94
+  moved). Pitch tags store no time and stay at most a frame late.
+- **`build_dataset.py`** writes the pose `flip_idx` (checked against
+  `VERTICES` and against `fetch_public.py` in `tests/test_build_dataset.py`,
+  so `fliplr` is sound for the pitch), takes `--holdout-window
+  MATCHID=START:END` so a single tagged match can still be scored on a
+  stretch it never trained on, drops tags within ten seconds of that
+  window from both sides, clears its previous output so no frame keeps an
+  old split, and keeps propagated tags out of val.
+- **`spike/labels/propagate.py`** fills the five frames between two
+  neighbouring ball tags by template matching forward from one tap and
+  backward from the other, keeping only frames where the two agree
+  within 3 px. On `20260919-flight`: 107 of 400 frames filled, two of
+  those visibly wrong on the contact sheet (both taps off the same way,
+  so both directions agreed on the same wrong spot) and deleted by hand.
+  Agreement does not catch shared tap error; the sheet does.
+- **`spike/evals/ball_on_tags.py`** scores a detector against held-out
+  tags: is its most confident detection within 20 px of the tap? That is
+  the question `ball_recall.py` cannot ask, and the one a detector
+  fine-tuned on ninety boxes most needs asked. `ball_recall.py --sheet`
+  writes a crop of every detection it counted as found, so that number
+  can be checked by eye.
+- **`spike/evals/wasb_ball.py`** runs WASB's released small-ball weights
+  cold. On its own static-camera ISSIA test clip it finds the ball in 11
+  of 13 frames; on our 40 held-out tags, in 0, with or without motion.
+  The heatmap at our ball is ~0.007 where WASB's threshold is 0.5. The
+  tagging plan stands.
+- **`docs/TRAINING.md`** now says what actually ran: native Windows
+  instead of WSL; `batch=6` for the ball at 1920 on 24 GB (at `batch=8`
+  the driver paged 7.5 GB into system RAM and training ran at a quarter
+  speed); `optimizer=auto` ignores `lr0`, `nbs=64` makes 53 images about
+  one update an epoch, and warmup runs 100 iterations at a bias rate of
+  0.1, so stage two names its optimizer, sets `nbs` to `batch` and turns
+  warmup off; weights land in `runs/detect/<name>/`, not where the old
+  commands said. The public ball set's balls measure 11.7 px median
+  against our 11, so stage one needs no scale correction. And no
+  `cache=ram` on Windows: stage one was stopped at epoch 41 of 60 for
+  running the 64 GB machine out of memory with it on, most likely a copy
+  of the 5.8 GB cache per spawned dataloader worker, for no speed gain on
+  a GPU-bound run.
+- **The green 20 Sept match is played with an orange ball**, the worn
+  19 Sept one with a white ball, so `docs/NEXT.md`'s 73%-against-43% is
+  ball colour as well as field condition; a caveat now says so there.
+  The green match stays the never-trained-on test, but until a match
+  with an orange ball is tagged it tests colour transfer as well.
+- **The ball, trained and scored.** Stage one (public data) reached
+  mAP50 0.95 on the public val split. On the worn match's 40 held-out
+  tags it puts its top detection on the ball in 19 (COCO: 5), but it
+  never draws a box outside 7–15 px, so on random bursts of the
+  zoomed-in follow-cam it finds 16% where COCO finds 63%. The fine-tune
+  on 53 tags from that match is the best of the four on that match and
+  the worst on the green one, where it fires on white kit shirts: 88%
+  "found", one on the orange match ball. A time split within one match
+  could not show that; the untouched second match did. `propagate.py`'s
+  frames stopped the fine-tune overfitting (21 against 10 of 40 at the
+  last epoch) and made the shirt habit more confident. Nothing trained
+  here beats COCO `yolo11x` on a match nothing was tuned on; the next
+  lever is tags from more matches, with sizes.
+- **The pitch, trained and scored.** `spike/evals/pitch_on_tags.py`
+  scores a keypoint model against tagged vertices, because
+  `pitch_keypoints.py`'s homography fit is self-consistency and was
+  again confidently wrong: it fitted 11 of 12 worn-match frames with
+  penalty boxes drawn beside the centre circle. Against the tags, the
+  public-data pretrain (keypoint mAP50 0.81 on its own val, still
+  rising at 200 epochs) finds 2 of 133 tagged vertices on our footage
+  and puts its guesses on open grass; the fine-tune on ten frames finds
+  none of the 25 on the two held-out frames and only 28% on its own
+  training frames. It learned the halfway line, the most-tagged
+  vertices, and invents the rest. Twelve frames and 317 broadcast images
+  are not enough; the SoccerNet conversion and many more tagged frames,
+  at both ends, are.
+- **`PITCH_KEYPOINTS.md` no longer says the public sets need a Roboflow
+  account.** They come anonymously from the Hugging Face mirrors through
+  `fetch_public.py`. This note was the last part of
+  `claude/ragging-data-training-hep16d` not already on this branch.
+
+## 0.1.9 — agents and skills for the routine work
+
+Claude Code sessions here had been spending their context on work that
+follows the same steps every time: pulling, committing, pushing, running
+the suite, re-reading long docs for a single number. That work now goes
+to project agents in `.claude/agents/`. Slash commands in
+`.claude/skills/` start them. The main session keeps its context for
+the design.
+
+- **`git-shepherd`** (`/sync`, `/ship`, `/pr`) is the only thing that
+  writes to git or GitHub. It merges both the branch's own remote and
+  its base (whatever the branch was cut from, recorded in
+  `branch.<name>.sidelinebase`, else `main`). On a conflict it aborts
+  the merge and reports both sides; it never resolves one. It runs the
+  suite before pushing and never force-pushes. It refuses to stage
+  video, weights, Parquet or anything under `data/`, `runs/` or `out/`.
+  After a PR it offers to delete only the local branch, because
+  deleting the remote branch of an open PR closes it; the remote branch
+  is offered once the PR has merged. `gh` is not installed on the
+  training PC, so without it the agent returns a compare link and a
+  ready PR body.
+- **`test-runner`** (`/test`) runs `pytest` in the background and
+  returns a few lines. When a test fails, it reruns that test on the
+  base branch in a throwaway worktree to say whether the failure is new.
+  The package is installed editable, so the worktree is imported through
+  `PYTHONPATH`; this was checked to import the worktree's `sideline`,
+  not the checkout's.
+- **`invariant-guard`** (`/guard`) reviews a diff against the invariants
+  in `CLAUDE.md`, with the file each one lives in.
+- **`docs-oracle`** (`/spec`) answers from SPEC, NEXT, TRAINING and the
+  eval notes with citations.
+- **`eval-runner`** (`/eval`) runs the `spike/evals` and `spike/labels`
+  scripts on the GPU and reports them by the rules those notes learned:
+  gap distributions, not rates; whether the model trained on the match;
+  self-consistency called what it is.
+- **`house-style`** is where the commit, CHANGELOG and PR conventions
+  are written down, so they no longer have to be inferred by reading
+  this file.

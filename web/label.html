@@ -378,11 +378,14 @@
   // play it but cannot read its pixels (no CORS headers), which is all this
   // page needs: it records where you tapped, and the pipeline pulls the
   // matching frame from its own copy later.
+  // "29.97" is 30000/1001; the difference is a tenth of a frame by the end
+  // of a match, enough to name the wrong frame near a boundary.
+  var NTSC = 30000 / 1001;
   var MATCHES = [
     { id: "20260919-flight", name: "19 Sept — Flight", note: "Worn olive field, 67 min. The hard one — start here.",
-      url: "https://c.veocdn.com/2f8eec5a-ffbd-4fce-8aa5-9dfdbb6260a8/standard/machine/b296102c/video.mp4", fps: 29.97 },
+      url: "https://c.veocdn.com/2f8eec5a-ffbd-4fce-8aa5-9dfdbb6260a8/standard/machine/b296102c/video.mp4", fps: NTSC },
     { id: "20260920-future", name: "20 Sept — Future", note: "Green school field, 68 min.",
-      url: "https://c.veocdn.com/f1a1abd0-b054-43cd-997c-19804c2c4979/standard/machine/99b85fc1/video.mp4", fps: 29.97 }
+      url: "https://c.veocdn.com/f1a1abd0-b054-43cd-997c-19804c2c4979/standard/machine/99b85fc1/video.mp4", fps: NTSC }
   ];
   var PAGES_URL = "https://dawsboss.github.io/Sports-Camera-Analytics-/label.html";
 
@@ -478,8 +481,13 @@
   }
 
   /* ---------- time ---------- */
-  function fps() { return (state.match && state.match.fps) || 29.97; }
-  function frameOf(t) { return Math.round(t * fps()); }
+  // A paused video shows the frame whose interval contains currentTime, so
+  // the frame on screen is the floor, not the nearest: with Math.round every
+  // tag past mid-frame was keyed to the frame after the one tapped, which on
+  // a fast zoomed pan put the box beside the ball. The epsilon only absorbs
+  // float error when a seek lands exactly on a frame boundary.
+  function fps() { return (state.match && state.match.fps) || NTSC; }
+  function frameOf(t) { return Math.floor(t * fps() + 1e-6); }
   function mmss(t) {
     if (!isFinite(t)) return "0:00";
     var m = Math.floor(t / 60), s = Math.floor(t % 60);
@@ -1392,7 +1400,7 @@
         var u = input.value.trim();
         if (!u) return;
         closeSheet();
-        openMatch({ id: "custom-" + u.slice(-40), name: "Custom video", note: u, url: u, fps: 29.97 });
+        openMatch({ id: "custom-" + u.slice(-40), name: "Custom video", note: u, url: u, fps: NTSC });
       });
       card.appendChild(go);
     });
