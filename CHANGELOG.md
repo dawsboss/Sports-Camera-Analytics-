@@ -366,3 +366,7 @@ New:
   vertices, and invents the rest. Twelve frames and 317 broadcast images
   are not enough; the SoccerNet conversion and many more tagged frames,
   at both ends, are.
+- **`PITCH_KEYPOINTS.md` no longer says the public sets need a Roboflow
+  account.** They come anonymously from the Hugging Face mirrors through
+  `fetch_public.py`. This note was the last part of
+  `claude/ragging-data-training-hep16d` not already on this branch.
