@@ -394,16 +394,31 @@
   // verbatim so their public dataset can pretrain a model and any community
   // model on this layout stays compatible. See spike/evals/PITCH_KEYPOINTS.md.
   var PW = 7000, PL = 12000, PBW = 4100, PBL = 2015, GBW = 1832, GBL = 550, CCR = 915, PSD = 1100;
-  var V = [
-    [0,0],[0,(PW-PBW)/2],[0,(PW-GBW)/2],[0,(PW+GBW)/2],[0,(PW+PBW)/2],[0,PW],
-    [GBL,(PW-GBW)/2],[GBL,(PW+GBW)/2],[PSD,PW/2],
-    [PBL,(PW-PBW)/2],[PBL,(PW-GBW)/2],[PBL,(PW+GBW)/2],[PBL,(PW+PBW)/2],
-    [PL/2,0],[PL/2,PW/2-CCR],[PL/2,PW/2+CCR],[PL/2,PW],
-    [PL-PBL,(PW-PBW)/2],[PL-PBL,(PW-GBW)/2],[PL-PBL,(PW+GBW)/2],[PL-PBL,(PW+PBW)/2],
-    [PL-PSD,PW/2],[PL-GBL,(PW-GBW)/2],[PL-GBL,(PW+GBW)/2],
-    [PL,0],[PL,(PW-PBW)/2],[PL,(PW-GBW)/2],[PL,(PW+GBW)/2],[PL,(PW+PBW)/2],[PL,PW],
-    [PL/2-CCR,PW/2],[PL/2+CCR,PW/2]
-  ];
+  // Only the boxes, the goal areas, the spot and the circle are fixed by the
+  // laws. Length and width are not: both real fields here are smaller than
+  // this one and nobody has measured either. So the layout is a function of
+  // them, and the suggestions below try every plausible size rather than
+  // trusting this one.
+  function pitchAt(PL, PW) {
+    return [
+      [0,0],[0,(PW-PBW)/2],[0,(PW-GBW)/2],[0,(PW+GBW)/2],[0,(PW+PBW)/2],[0,PW],
+      [GBL,(PW-GBW)/2],[GBL,(PW+GBW)/2],[PSD,PW/2],
+      [PBL,(PW-PBW)/2],[PBL,(PW-GBW)/2],[PBL,(PW+GBW)/2],[PBL,(PW+PBW)/2],
+      [PL/2,0],[PL/2,PW/2-CCR],[PL/2,PW/2+CCR],[PL/2,PW],
+      [PL-PBL,(PW-PBW)/2],[PL-PBL,(PW-GBW)/2],[PL-PBL,(PW+GBW)/2],[PL-PBL,(PW+PBW)/2],
+      [PL-PSD,PW/2],[PL-GBL,(PW-GBW)/2],[PL-GBL,(PW+GBW)/2],
+      [PL,0],[PL,(PW-PBW)/2],[PL,(PW-GBW)/2],[PL,(PW+GBW)/2],[PL,(PW+PBW)/2],[PL,PW],
+      [PL/2-CCR,PW/2],[PL/2+CCR,PW/2]
+    ];
+  }
+  var V = pitchAt(PL, PW);
+  // Every size from a small 9v9 field to past the largest the laws allow,
+  // in 2.5 m steps. Below 45 m wide the penalty box no longer fits.
+  var SIZES = [];
+  (function () {
+    for (var l = 6000; l <= 12500; l += 250)
+      for (var w = 4500; w <= 8000; w += 250) SIZES.push(pitchAt(l, w));
+  })();
   var VN = [
     "corner L-top","pen L-top out","goal L-top out","goal L-bot out","pen L-bot out","corner L-bot",
     "goal L-top in","goal L-bot in","pen spot L",
@@ -537,22 +552,102 @@
     return [(H[0][0] * p[0] + H[0][1] * p[1] + H[0][2]) / w,
             (H[1][0] * p[0] + H[1][1] * p[1] + H[1][2]) / w];
   }
-  function recomputePred() {
-    state.pred = null;
-    var idx = Object.keys(state.pins);
-    if (idx.length < 4) return;
-    var src = [], dst = [], i;
-    for (i = 0; i < idx.length; i++) { src.push(V[idx[i]]); dst.push(state.pins[idx[i]]); }
-    var H = solveH(src, dst);
-    if (!H) return;
+  // The homogeneous weight of a projected point. Every placed point has the
+  // same sign; a point with the other sign is behind the camera, and the
+  // division in applyH folds it back into the frame upside down.
+  function wOf(H, p) { return H[2][0] * p[0] + H[2][1] * p[1] + H[2][2]; }
+  function fitSSR(H, src, dst, ar) {
+    var e = 0, k, q;
+    for (k = 0; k < src.length; k++) {
+      q = applyH(H, src[k]);
+      if (!q) return Infinity;
+      e += Math.pow(q[0] - dst[k][0], 2) + Math.pow((q[1] - dst[k][1]) * ar, 2);
+    }
+    return e;
+  }
+  // A ring is drawn only where the placed points actually decide it. One
+  // homography through four taps was drawn everywhere, and it was wrong in
+  // two ways that no amount of care in tapping fixes: three points on one
+  // line (the goal line, which is where the next-point walk used to lead)
+  // leave the fit free to swing anywhere off that line, and a 120 x 70
+  // layout on a smaller field puts every ring past the box on the wrong
+  // grass. So the fit is repeated for every pitch size the taps do not rule
+  // out, and with the taps shaken by a finger's width, and a ring survives
+  // only if all of those agree on where it goes. What the taps do not pin
+  // down — the far half before anything past the box is placed — shows no
+  // ring at all, which costs one tap; a ring in the wrong place costs a
+  // wrong label or a tap spent hunting for why.
+  var TAP_ERR = 0.006;   // a placed point's error, as a fraction of frame width
+  var PRED_TOL = 0.03;   // how far a ring may be off before it is not shown: about its radius on a phone
+  function collinear(P, Q, R) {
+    return Math.abs((Q[0] - P[0]) * (R[1] - P[1]) - (Q[1] - P[1]) * (R[0] - P[0])) < 1;
+  }
+  // Four points fix a homography only if no three of them share a line;
+  // more fix it unless all but one do. Three points along the box front and
+  // one on the goal line leave a whole family of fits that match the taps
+  // exactly, and the solver hands back one of them with no complaint.
+  function determined(idx) {
+    var a, b, k, n;
+    for (a = 0; a < idx.length; a++) for (b = a + 1; b < idx.length; b++) {
+      for (n = 0, k = 0; k < idx.length; k++) if (collinear(V[idx[a]], V[idx[b]], V[idx[k]])) n++;
+      if (n >= idx.length - 1) return false;
+    }
+    return true;
+  }
+  function predictPins(pins, ar) {
+    var idx = Object.keys(pins).map(Number);
+    if (idx.length < 4 || !determined(idx)) return null;
+    var dst = idx.map(function (i) { return pins[i]; }), fits = [], best = null, s, k, i;
+    for (s = 0; s < SIZES.length; s++) {
+      var src = idx.map(function (i) { return SIZES[s][i]; });
+      var H = solveH(src, dst);
+      if (!H) continue;
+      var sg = wOf(H, src[0]) > 0, same = true;
+      for (k = 1; k < src.length; k++) if ((wOf(H, src[k]) > 0) !== sg) same = false;
+      if (!same) continue;
+      var f = { H: H, sg: sg, Vs: SIZES[s], ssr: fitSSR(H, src, dst, ar) };
+      fits.push(f);
+      if (!best || f.ssr < best.ssr) best = f;
+    }
+    if (!best) return null;
+    // Sizes the taps cannot tell apart from the best one: within about three
+    // tap errors of it in total. With four points every size fits exactly.
+    var slack = 9 * TAP_ERR * TAP_ERR, keep = [];
+    for (s = 0; s < fits.length; s++) if (fits[s].ssr <= best.ssr + slack) keep.push(fits[s]);
+    // The same fit with the taps shaken, deterministically so the rings do
+    // not wander between redraws.
+    var shaken = [], seed = 1;
+    var rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+    var bsrc = idx.map(function (i) { return best.Vs[i]; });
+    for (k = 0; k < 12; k++) {
+      var d2 = dst.map(function (p) {
+        return [p[0] + rnd() * 2 * TAP_ERR, p[1] + rnd() * 2 * TAP_ERR / ar];
+      });
+      var Hj = solveH(bsrc, d2);
+      if (Hj) shaken.push({ H: Hj, sg: wOf(Hj, bsrc[0]) > 0, Vs: best.Vs });
+    }
     var out = {};
     for (i = 0; i < V.length; i++) {
-      if (state.pins[i]) continue;
-      var p = applyH(H, V[i]);
-      if (!p || p[0] < -0.08 || p[0] > 1.08 || p[1] < -0.08 || p[1] > 1.08) continue;
-      out[i] = [Math.min(1, Math.max(0, p[0])), Math.min(1, Math.max(0, p[1]))];
+      if (pins[i]) continue;
+      if ((wOf(best.H, best.Vs[i]) > 0) !== best.sg) continue;
+      var p = applyH(best.H, best.Vs[i]);
+      if (!p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) continue;
+      var worst = 0, all = keep.concat(shaken), ok = true;
+      for (k = 0; k < all.length && ok; k++) {
+        var g = all[k];
+        if ((wOf(g.H, g.Vs[i]) > 0) !== g.sg) { ok = false; break; }
+        var q = applyH(g.H, g.Vs[i]);
+        if (!q) { ok = false; break; }
+        worst = Math.max(worst, Math.hypot(q[0] - p[0], (q[1] - p[1]) * ar));
+        if (worst > PRED_TOL) ok = false;
+      }
+      if (ok) out[i] = p;
     }
-    state.pred = out;
+    return out;
+  }
+  function recomputePred() {
+    var ar = (vid.videoWidth && vid.videoHeight) ? vid.videoHeight / vid.videoWidth : 9 / 16;
+    state.pred = predictPins(state.pins, ar);
   }
 
   /* ---------- pitch diagram ---------- */
@@ -596,12 +691,23 @@
       draw();
     });
   }
+  // Nearest to the last point, but not a third point on a line two placed
+  // points already fix while there is another choice: from a corner the
+  // nearest neighbours all sit on the goal line, and four taps along it pin
+  // nothing off it.
+  function onPlacedLine(j) {
+    var idx = Object.keys(state.pins).map(Number), a, b;
+    for (a = 0; a < idx.length; a++) for (b = a + 1; b < idx.length; b++)
+      if (collinear(V[idx[a]], V[idx[b]], V[j])) return true;
+    return false;
+  }
   function nextUnplaced(from) {
-    var best = null, bd = Infinity, i;
+    var best = null, bd = Infinity, i, d;
     if (from == null) return null;
     for (i = 0; i < V.length; i++) {
       if (state.pins[i] || state.skipped[i] || i === from) continue;
-      var d = Math.hypot(V[i][0] - V[from][0], V[i][1] - V[from][1]);
+      d = Math.hypot(V[i][0] - V[from][0], V[i][1] - V[from][1]);
+      if (onPlacedLine(i)) d += 1e6;
       if (d < bd) { bd = d; best = i; }
     }
     return best;
@@ -665,6 +771,7 @@
           xy = state.pred[i];
           node = document.createElement("div");
           node.className = "pin pred";
+          node.dataset.i = i;
           node.style.left = (xy[0] * 100) + "%"; node.style.top = (xy[1] * 100) + "%";
           node.title = "predicted: " + VN[i] + " — tap to accept";
           zoomer.appendChild(node);
