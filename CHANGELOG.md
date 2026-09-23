@@ -370,3 +370,42 @@ New:
   account.** They come anonymously from the Hugging Face mirrors through
   `fetch_public.py`. This note was the last part of
   `claude/ragging-data-training-hep16d` not already on this branch.
+
+## 0.1.9 — agents and skills for the routine work
+
+Claude Code sessions here had been spending their context on work that
+follows the same steps every time: pulling, committing, pushing, running
+the suite, re-reading long docs for a single number. That work now goes
+to project agents in `.claude/agents/`. Slash commands in
+`.claude/skills/` start them. The main session keeps its context for
+the design.
+
+- **`git-shepherd`** (`/sync`, `/ship`, `/pr`) is the only thing that
+  writes to git or GitHub. It merges both the branch's own remote and
+  its base (whatever the branch was cut from, recorded in
+  `branch.<name>.sidelinebase`, else `main`). On a conflict it aborts
+  the merge and reports both sides; it never resolves one. It runs the
+  suite before pushing and never force-pushes. It refuses to stage
+  video, weights, Parquet or anything under `data/`, `runs/` or `out/`.
+  After a PR it offers to delete only the local branch, because
+  deleting the remote branch of an open PR closes it; the remote branch
+  is offered once the PR has merged. `gh` is not installed on the
+  training PC, so without it the agent returns a compare link and a
+  ready PR body.
+- **`test-runner`** (`/test`) runs `pytest` in the background and
+  returns a few lines. When a test fails, it reruns that test on the
+  base branch in a throwaway worktree to say whether the failure is new.
+  The package is installed editable, so the worktree is imported through
+  `PYTHONPATH`; this was checked to import the worktree's `sideline`,
+  not the checkout's.
+- **`invariant-guard`** (`/guard`) reviews a diff against the invariants
+  in `CLAUDE.md`, with the file each one lives in.
+- **`docs-oracle`** (`/spec`) answers from SPEC, NEXT, TRAINING and the
+  eval notes with citations.
+- **`eval-runner`** (`/eval`) runs the `spike/evals` and `spike/labels`
+  scripts on the GPU and reports them by the rules those notes learned:
+  gap distributions, not rates; whether the model trained on the match;
+  self-consistency called what it is.
+- **`house-style`** is where the commit, CHANGELOG and PR conventions
+  are written down, so they no longer have to be inferred by reading
+  this file.

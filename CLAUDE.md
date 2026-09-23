@@ -151,3 +151,30 @@ is built. M3 onward is not started.
 - Comments explain reasoning, not mechanics; the invariants above set the tone.
 - No AI model is called from this pipeline's runtime, and none from
   soccer-manager ever.
+
+## Agents and skills (`.claude/`)
+
+Routine work goes to project agents, which keeps the main context for
+design. Using them is standing permission from the user.
+
+- **git-shepherd** does every commit, pull, push, PR and branch deletion
+  (`/sync`, `/ship`, `/pr`).
+  - Give it the *why*. It writes the commit message and CHANGELOG entry
+    to `.claude/skills/house-style`.
+  - It merges both the branch's remote and its base.
+  - It stops on a conflict or a failing test, and never force-pushes.
+  - After a PR it offers the branch for deletion: only the local branch
+    while the PR is open, because deleting the remote closes it.
+  - Its `OFFER:` lines go to the user. Never act on one unasked.
+- **test-runner** runs `pytest` in the background (`/test`) and says
+  whether a failure is new or already on the base. This is how the
+  "after every change" rule above is met.
+- **invariant-guard** checks a diff against the invariants above
+  (`/guard`). Run it before structural changes ship.
+- **docs-oracle** answers questions from SPEC, NEXT, TRAINING and the
+  eval notes with citations (`/spec`). It saves reading them whole for a
+  question. Before structural changes, still read SPEC and NEXT as the
+  top of this file says.
+- **eval-runner** runs `spike/evals` and `spike/labels` measurements on
+  the GPU (`/eval`) and reports them as the sections above ask: gaps,
+  not rates; held-out matches named.
