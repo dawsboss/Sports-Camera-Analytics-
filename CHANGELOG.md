@@ -409,3 +409,44 @@ the design.
 - **`house-style`** is where the commit, CHANGELOG and PR conventions
   are written down, so they no longer have to be inferred by reading
   this file.
+
+## 0.1.10 — the camera first
+
+After the first training run, the question was whether what remains is
+just more tagging, training and tuning. It is not: most of the effort so
+far went into a problem the product does not have. Registering a
+panning, zooming follow-cam from the paint on every frame means every
+new field brings new confusers and new paint, so every new field has
+needed its own labels. A fixed camera is calibrated once per placement
+by clicking landmarks (M10), so a new field costs minutes, not an
+evening of tagging and a training run — and the spec itself says to stop
+and build the camera when the follow-cam pipeline is the wrong thing to
+optimise. `docs/NEXT.md` gains a section, "The camera first (23
+September)", with that reasoning, a follow-cam-versus-fixed-camera
+table, a short survey of how commercial systems handle this (labelled as
+a survey, not a measurement), and the observation that Veo's own rig is
+a fixed camera, so follow-cam frames could instead be registered by
+clicking a few keyframes per match and tracking the fixed background
+(road, backstop, trees) between them.
+
+- **Players are still solved off the shelf**, and the ball is still the
+  one risk a fixed camera keeps: at the spec's 35–50 px per metre it is
+  about 7–11 px, which is arithmetic, not a measurement, so it has to be
+  measured on fixed footage before more ball tagging trains for the
+  wrong scale.
+- **"Next steps, in order" is rewritten**: (1) a fixed-camera test with a
+  phone or action camera at 4K before building any rig, measuring player
+  and ball pixel size, blur and coverage, and running the existing
+  detectors and WASB on it; (2) M3 detection and tracking on the Veo
+  footage now, which needs neither registration nor the ball; (3)
+  identity and a first review UI; (4) click calibration, then keyframe
+  registration for the follow-cam; (5) the ball, on the footage the
+  product will actually record; (6) restarts and possession. The pitch
+  keypoint/line model and one-match ball fine-tunes are parked, with
+  what would bring each back.
+- **`CLAUDE.md`'s summary, its SoccerNet line-network note and its first
+  known gap** now say the same, and a new known gap records that no
+  fixed-camera footage exists yet.
+- **`docs/SPEC.md` is untouched.** It is a copy of the living design doc,
+  which the user updates separately; this branch only reorders the work
+  in `NEXT.md` ahead of it.
