@@ -192,6 +192,13 @@ of `spike/evals/`.
    visible too: those are what stop a detector firing on a corner flag.
    Train on the homelab GPU, and measure with `ball_recall.py` on the
    held-out match, never the one trained on.
+
+   *First attempt, 2026-09-23* (`spike/evals/training_2026-09-23.md`):
+   public pretraining alone finds small distant balls COCO misses, but
+   nothing larger than 15 px; fine-tuning on 53 tags from one match made
+   a detector for that match, which on the other match fired on white
+   kit shirts. The tagging this step needs is several matches with
+   different kits and balls, and a size on each tag, not more of one.
 2. **A pitch keypoint model, not a line model.** Changed after reading
    roboflow/sports: a model that emits 32 *named* pitch points removes
    the naming search entirely, where a line model only feeds it. Adopt

@@ -159,7 +159,10 @@ in front of `python` and `yolo`. What differs from Linux:
   60 for running a 64 GB machine out of memory with it on. It bought
   nothing either: at `batch=6` and 1920 px the GPU is the bottleneck, and
   four workers decode JPEGs far faster than it consumes them. Use the
-  default (no cache) and `workers=4`.
+  default (no cache) and `workers=4`. Even so, budget about 24 GB of RAM
+  for a run: every spawned worker imports torch, and one ball run is
+  fifteen Python processes (four train workers, eight val, and their
+  parents).
 - **Stopping a run** means stopping its dataloader workers too; they are
   separate `python.exe` processes. Stop the `yolo.exe` process and its
   children.
@@ -236,6 +239,13 @@ the 32 tags where a detector could tell the frames apart. It reports how
 many it moved. Pitch tags carry no time and keep their key, at most a
 frame late on a mostly still pitch. The tagger now keys by the floor, so
 new tags need no correction.
+
+**Every ball tag becomes a 22 px box**, because a tag is a tap and has
+no size. Right for the 11 px ball the static camera and a distant
+follow-cam shot see; wrong for a zoomed follow-cam shot, where the ball
+is 30–40 px and the label is its middle. Models fine-tuned on these
+tags draw 22 px boxes and nothing else. A size gesture in the tagger — a
+second tap on the ball's edge — is the fix, and it is not built yet.
 
 ## 5. Multiply the labels you already have
 
@@ -353,6 +363,17 @@ epochs. `scale` defaults to 0.5, meaning a random resize anywhere in
 a problem for a 60 px person and both are fatal for this class. Put
 `mosaic=0.0` on stage one too, for the same reason.
 
+**Measured on the first run, that protects the small ball at the price
+of the big one.** Stage one never drew a box outside 7–15 px, the public
+set's range. That is right for a distant ball, and it won the dim
+passage the COCO model could not see (19 of 20 against 5). But the
+follow-cam zooms in on play: COCO's hits on the worn match have a median
+of 19 px and reach 40, and there stage one found 16% of samples against
+COCO's 63%. For follow-cam footage, widen `scale` or add zoomed frames;
+for the static camera, where the ball's size varies only with distance,
+this recipe is the right one. The fixed 22 px tag box has the same blind
+spot — see section 4.
+
 **Do not reach for `freeze`.** The reflex with ninety boxes is to freeze
 the backbone so a tiny fine-tuning set cannot wreck it. That protects the
 wrong thing here: our domain shift is low-level — olive grass instead of
@@ -448,7 +469,24 @@ than not, but quote `last.pt` alongside it so nobody has to wonder.
 
 For the pitch, **look at the overlays in `out/pitch`**. Reprojection error
 is measured against the model's own points, so a confidently wrong fit
-reports 2-6 px and is still wrong. The overlay is the honest check.
+reports 2-6 px and is still wrong. The overlay is the honest check, and
+where frames are tagged there is a numeric one:
+
+```bash
+python spike/evals/pitch_on_tags.py --data data/ours/pitch --split val \
+    --weights runs/pose/pitch_ft/weights/best.pt --out out/pitch_tags
+```
+
+It counts each tagged vertex as found (named, within 25 px), wrong
+(named, more than 60 px off) or not named. On the first run
+`pitch_keypoints.py` reported a fitted homography in 11 of 12 frames
+while this found 0 of 25 held-out vertices; the overlays sided with the
+tags. `--split all` is fair only for a model that trained on none of
+the tagged frames, such as the public pretrain.
+
+The public pitch pretrain was still improving at 200 epochs (keypoint
+mAP50 0.69 at 160, 0.81 at 200) and takes ten minutes per hundred on
+this card; give it 400.
 
 Pass the real pitch dimensions with `--pitch LENGTH WIDTH`. Neither field
 is 105 x 68 and neither has been measured, which is a known gap: until
@@ -480,6 +518,17 @@ samples and 2 of 12 pitch frames, leaving 53 and 10 to train on. Keep the
 green match whole and untouched meanwhile, as the closest thing we have
 to the spec's third, never-trained-on match; `ball_recall.py` on it is
 the cleanest number available.
+
+**A time split measures generalisation within a match, not to the next
+one, and the first run showed the difference.** The ball fine-tune
+matched or beat stage one on the worn match's held-out window (21–22 of
+40 against 19) and on that match's random bursts (71% found, real balls
+on the sheet). On the green match it fired on 88% of samples and hit the
+orange match ball in one: the rest were white kit shirts. The worn match
+has yellow and black kits, so in its 53 training frames the only white
+thing was the ball. Nothing within that match could reveal it. So tag
+several matches, with different kits and ball colours, and keep one
+whole; `spike/evals/training_2026-09-23.md` has the numbers.
 
 ### Quote the gap distribution, not mAP
 

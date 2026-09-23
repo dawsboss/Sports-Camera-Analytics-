@@ -304,6 +304,29 @@ New:
   ball colour as well as field condition; a caveat now says so there.
   The green match stays the never-trained-on test, but until a match
   with an orange ball is tagged it tests colour transfer as well.
-- **Not yet measured:** the fine-tunes and the pitch. Stage one reached
-  mAP50 0.94 on the public set's own val split before it was stopped;
-  nothing trained has been scored on our footage yet.
+- **The ball, trained and scored.** Stage one (public data) reached
+  mAP50 0.95 on the public val split. On the worn match's 40 held-out
+  tags it puts its top detection on the ball in 19 (COCO: 5), but it
+  never draws a box outside 7–15 px, so on random bursts of the
+  zoomed-in follow-cam it finds 16% where COCO finds 63%. The fine-tune
+  on 53 tags from that match is the best of the four on that match and
+  the worst on the green one, where it fires on white kit shirts: 88%
+  "found", one on the orange match ball. A time split within one match
+  could not show that; the untouched second match did. `propagate.py`'s
+  frames stopped the fine-tune overfitting (21 against 10 of 40 at the
+  last epoch) and made the shirt habit more confident. Nothing trained
+  here beats COCO `yolo11x` on a match nothing was tuned on; the next
+  lever is tags from more matches, with sizes.
+- **The pitch, trained and scored.** `spike/evals/pitch_on_tags.py`
+  scores a keypoint model against tagged vertices, because
+  `pitch_keypoints.py`'s homography fit is self-consistency and was
+  again confidently wrong: it fitted 11 of 12 worn-match frames with
+  penalty boxes drawn beside the centre circle. Against the tags, the
+  public-data pretrain (keypoint mAP50 0.81 on its own val, still
+  rising at 200 epochs) finds 2 of 133 tagged vertices on our footage
+  and puts its guesses on open grass; the fine-tune on ten frames finds
+  none of the 25 on the two held-out frames and only 28% on its own
+  training frames. It learned the halfway line, the most-tagged
+  vertices, and invents the rest. Twelve frames and 317 broadcast images
+  are not enough; the SoccerNet conversion and many more tagged frames,
+  at both ends, are.
