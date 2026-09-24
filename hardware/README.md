@@ -8,6 +8,17 @@ otherwise; the first match on it is a measurement, not a result.
 
 ![The head](head/renders/assembly_front.png)
 
+There are two ways to build it, on the same mast, switch and recorder:
+
+- **The open head** (this page): four Milesight bullets on a printed head.
+  It has the better camera: 16 Mbps, a fixed lens, and a shutter you can
+  set.
+- **The hidden pod** (`pod/README.md`): four Reolink RLC-833A zoom turrets
+  inside one printed housing, lenses behind flush ports, so it reads as one
+  sports camera. The cameras cost a quarter as much and put slightly more
+  pixels on the ball, at half the bitrate. Record one match on one of them
+  before choosing it.
+
 ## What it sees
 
 `rig_geometry.py` projects every metre of the pitch through the four cameras
@@ -86,10 +97,14 @@ Why these:
   covered list. Hikvision and Dahua, and the brands built on them, are
   avoided for that reason.
 
-**Cheaper near pair:** the Reolink RLC-810A (4K, 4 mm, 87 degrees) costs
-about a fifth as much. It caps at 8 Mbps and 25 fps, which is tolerable where
-the near pair works, 10-50 m out. There is no cheap equivalent with a 6 mm
-lens for the far pair, and the far pair is where the pixels matter.
+**Cheaper cameras:** the Reolinks cost a fifth to a quarter as much and cap
+at 8 Mbps and 25 fps.
+
+- A fixed 4K Reolink like the RLC-810A (4 mm, 87 degrees) will do for the
+  near pair, which works 10-50 m out.
+- The far pair needs a narrow lens, and no fixed Reolink has one.
+- The RLC-833A's zoom, set to 54 degrees, does. That is the hidden pod
+  (`pod/README.md`).
 
 ### Mast
 
@@ -303,7 +318,8 @@ It prints coverage and the smallest ball and player. With `--out` it draws:
   them, to compare with its live view;
 - the coverage map.
 
-Cards for 11v11, 9v9 and 7v7 from the standard spot are already in `aim/`.
+Cards for 11v11, 9v9 and 7v7 from the standard spot are already in `aim/`,
+and the pod's (`--head reolink-833a`) in `pod/aim/`.
 The penalty boxes on the 9v9 and 7v7 cards are the pipeline's defaults, and
 real youth boxes differ. Aim those by the touchlines, the halfway line and
 the centre circle.

@@ -500,3 +500,57 @@ built for is still ahead.
   per-view registration merged on the pitch, which is a spec decision;
   and `StaticRegistrar.register()` ignores the frame, so a bumped or
   swaying mast would silently shift every coordinate after it.
+
+## 0.1.12 — a hidden pod, and what cheaper cameras give up
+
+Answers whether cheaper Reolink cameras would do, and hides them: a second
+build beside the open head, four RLC-833A zoom turrets behind flush ports
+in one printed pod, so the rig reads as one sports camera rather than four
+security cameras on a stick. What decides it is pixels per degree, not
+megapixels, and it favours the zoom turret; what it gives up is bitrate,
+frame rate, an unpublished shutter limit and an unproven zoom motor, so
+the pod is a second build to test, not a replacement yet.
+
+- **Pixels per degree, not megapixels.** From the same mast and lens
+  model, the smallest ball on 11v11 is 6.3 px on four fixed RLC-810A (87
+  degrees), 7.1 px on four 12 MP P340 (93 degrees), 8.6 px on the open
+  head's Milesights, and 9.3 px on four RLC-833A zoom turrets (far pair
+  zoomed to 54 degrees, near pair at 84) — at about a quarter of the
+  camera cost, $310-420 against about $1,580. The price: half the bitrate
+  (8 vs 16 Mbps), 25 fps, an unpublished fastest shutter, and a motorised
+  zoom that must come back after every power-up. Record one match on one
+  RLC-833A (`docs/NEXT.md`'s fixed-camera test, ball recall over bursts)
+  before buying four.
+- **`hardware/pod/sideline_pod.scad`** is the convex hull of a window disc
+  per camera, the camera bases, a roof, a back and a floor ring. Each
+  window is a face of that hull, so nothing of the housing stands in front
+  of its plane: it cannot enter a view, and each camera can be trimmed 5
+  degrees either way.
+- **The shell is a rain screen, not a seal** (the cameras are IP66). It
+  prints as a cap and four quarters, so the roof has no seam; every seam
+  is a butt joint with a tongue behind it, and on level seams the tongue
+  rises from the piece below, so water that creeps in runs back out. A
+  printed frame (core, seat rings on struts, floor ring, top plate)
+  carries the load, with each seat whole to one frame half so no seat is
+  cut between prints. Print orientations keep every support inside the
+  shell; the lower quarters print upside down, standing on their own
+  tongue, because floor-down would scar the underside — the face the
+  touchline looks at.
+- **`hardware/pod/check_pod.py`** fixes two problems the first export had,
+  floating lap strips and a top plate poking 3 mm through the back wall,
+  and now checks, from the `.scad`'s own parameters: windows flush; no
+  shell or frame in any view with 5 degrees of trim; clearances between
+  turrets, shell, frame and the frame halves; and every piece one
+  watertight body that fits a 250 mm bed. All pass: turret to turret 7.3
+  mm, turret to shell 4.3 mm, frame to shell 4.5 mm.
+- **Aim.** The first aims (near pair ±40/28, far zoom 53) left gaps inside
+  the lines in 5 of 300 trials with every camera 2 degrees off; the
+  shipped aims (near ±39/27, far zoom 54, far ±26/4) leave none in 600.
+  `hardware/rig_geometry.py` gains `--head reolink-833a` (a `HEADS`
+  table), so the pod's numbers and its aim cards (`hardware/pod/aim/`)
+  come from the same model as the open head's.
+- **`hardware/recorder/record.sh`** now copies video only (`-map 0:v`): S0
+  already drops audio (`-an` in `sideline/stages/s0_ingest.py`), the
+  Reolinks have microphones, and a sideline microphone records the parents
+  standing under it. It also documents the Reolink RTSP path
+  (`PATH_MAIN=h265Preview_01_main`).

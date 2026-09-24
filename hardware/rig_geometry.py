@@ -10,9 +10,11 @@ each part of the pitch.
 
     python hardware/rig_geometry.py                          # 8 m mast, 10 m back, 100 x 64
     python hardware/rig_geometry.py --mast 7.4 --setback 9 --length 69 --width 46 --out aim/
+    python hardware/rig_geometry.py --head reolink-833a      # the hidden pod's cameras
 
-Lenses are modelled f-theta with the Milesight MS-C8164-PD datasheet fields
-of view; the datasheet's H:V ratios match 16:9 f-theta within two degrees.
+Lenses are modelled f-theta with the datasheet fields of view: the Milesight
+MS-C8164-PD's, whose H:V ratios match 16:9 f-theta within two degrees, or
+the Reolink RLC-833A's zoom at the pod's two settings.
 Real lenses bend straight lines a little differently near the edges, so a
 card is good for aiming to a degree or two, not for calibration: the
 pitch mapping itself always comes from clicked landmarks (M10).
@@ -31,18 +33,32 @@ from pathlib import Path
 
 import numpy as np
 
-# Datasheet fields of view (degrees, horizontal x vertical) at 3840 x 2160.
-LENSES = {"2.8mm": (110.0, 60.0), "4mm": (91.0, 50.0), "6mm": (55.0, 32.0)}
+# Datasheet fields of view (degrees, horizontal x vertical) at 3840 x 2160:
+# the Milesight MS-C8164-PD's fixed lenses, and the Reolink RLC-833A's zoom
+# at the two settings the pod uses. Its sheet gives 94 x 53 at the wide end
+# and 50 x 30 at the long end; the vertical here is interpolated between.
+LENSES = {"2.8mm": (110.0, 60.0), "4mm": (91.0, 50.0), "6mm": (55.0, 32.0),
+          "833A@54": (54.0, 32.1), "833A@84": (84.0, 47.8)}
 W_PX, H_PX = 3840, 2160
 
-# The printed head's aims (hardware/head/sideline_head.scad): yaw from
-# straight across the pitch, positive to the right; tilt down.
-HEAD = (
-    ("FAR-L", -25.5, 4.0, "6mm"),
-    ("FAR-R", 25.5, 4.0, "6mm"),
-    ("NEAR-L", -40.0, 26.0, "4mm"),
-    ("NEAR-R", 40.0, 26.0, "4mm"),
-)
+# Each head's aims: yaw from straight across the pitch, positive to the
+# right; tilt down. "milesight" is the open printed head
+# (hardware/head/sideline_head.scad), "reolink-833a" the hidden pod
+# (hardware/pod/sideline_pod.scad).
+HEADS = {
+    "milesight": (
+        ("FAR-L", -25.5, 4.0, "6mm"),
+        ("FAR-R", 25.5, 4.0, "6mm"),
+        ("NEAR-L", -40.0, 26.0, "4mm"),
+        ("NEAR-R", 40.0, 26.0, "4mm"),
+    ),
+    "reolink-833a": (
+        ("FAR-L", -26.0, 4.0, "833A@54"),
+        ("FAR-R", 26.0, 4.0, "833A@54"),
+        ("NEAR-L", -39.0, 27.0, "833A@84"),
+        ("NEAR-R", 39.0, 27.0, "833A@84"),
+    ),
+}
 COLOURS = {"FAR-L": (200, 120, 40), "FAR-R": (60, 170, 230), "NEAR-L": (90, 180, 90), "NEAR-R": (60, 90, 220)}  # BGR
 
 
@@ -76,9 +92,9 @@ class Camera:
         return uv, ok
 
 
-def rig(mast: float, setback: float, width: float) -> list[Camera]:
+def rig(mast: float, setback: float, width: float, head: str = "milesight") -> list[Camera]:
     pos = np.array([0.0, -width / 2 - setback, mast])
-    return [Camera(n, pos, y, t, l) for n, y, t, l in HEAD]
+    return [Camera(n, pos, y, t, l) for n, y, t, l in HEADS[head]]
 
 
 def grid(length: float, width: float, margin: float, step: float) -> np.ndarray:
@@ -139,7 +155,7 @@ def coverage(cams: list[Camera], xy: np.ndarray, head_h: float = 1.8) -> float:
 
 
 def report(args: argparse.Namespace) -> tuple[list[Camera], np.ndarray, dict[str, np.ndarray]]:
-    cams = rig(args.mast, args.setback, args.width)
+    cams = rig(args.mast, args.setback, args.width, args.head)
     xy = grid(args.length, args.width, 0.0, 1.0)
     m = per_point(cams, xy, args.ball, args.player)
     cov = coverage(cams, grid(args.length, args.width, args.margin, 1.0))
@@ -147,7 +163,7 @@ def report(args: argparse.Namespace) -> tuple[list[Camera], np.ndarray, dict[str
     def at(x, y):
         return int(np.argmin(np.linalg.norm(xy - [x, y], axis=1)))
     worst = int(np.nanargmin(m["ball"]))
-    print(f"pitch {args.length:g} x {args.width:g} m, mast {args.mast:g} m, {args.setback:g} m behind the touchline")
+    print(f"{args.head} head; pitch {args.length:g} x {args.width:g} m, mast {args.mast:g} m, {args.setback:g} m behind the touchline")
     print(f"  in frame, feet and heads, pitch plus {args.margin:g} m: {cov * 100:.1f}%")
     print(f"  smallest ball {m['ball'][worst]:.1f} px at ({xy[worst, 0]:+.0f}, {xy[worst, 1]:+.0f}); "
           f"far corner {m['ball'][at(-L, W)]:.1f} px; centre spot {m['ball'][at(0, 0)]:.1f} px")
@@ -236,6 +252,8 @@ def coverage_map(cams: list[Camera], length: float, width: float, m: dict[str, n
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--head", choices=sorted(HEADS), default="milesight",
+                    help="milesight: the open head; reolink-833a: the hidden pod")
     ap.add_argument("--mast", type=float, default=8.0, help="camera height above the grass, metres")
     ap.add_argument("--setback", type=float, default=10.0, help="mast distance behind the touchline, metres")
     ap.add_argument("--length", type=float, default=100.0)
