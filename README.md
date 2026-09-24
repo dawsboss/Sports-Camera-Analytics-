@@ -76,6 +76,7 @@ sideline/
   worker/             RQ worker
   spike.py, cli.py    the M1 spike and the `sideline` command
 docs/SPEC.md          the design, copied from the living doc
+hardware/             the static rig (M9): what to buy, the printed four-camera head, aim cards
 tests/                pytest; everything runs on a CPU with no services
 ```
 

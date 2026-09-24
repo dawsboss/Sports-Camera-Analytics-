@@ -450,3 +450,53 @@ clicking a few keyframes per match and tracking the fixed background
 - **`docs/SPEC.md` is untouched.** It is a copy of the living design doc,
   which the user updates separately; this branch only reorders the work
   in `NEXT.md` ahead of it.
+
+## 0.1.11 — a buying list, a printed head and the coverage arithmetic
+
+Turns the camera-first decision into hardware: a fixed sideline rig for
+daytime youth games (U10-U17), on a mast, the static camera the spec's
+Mode A is built for (M9, pulled forward by `docs/NEXT.md`). Everything
+here is sized by arithmetic, not a measurement, and the field test it is
+built for is still ahead.
+
+- **The halfway line, not behind a goal.** It is the one spot that
+  minimises the farthest distance to any point on the pitch: 86-90 m on
+  11v11, against 110 m behind a goal and 126 m from a corner.
+- **An uneven lens split beats an even one.** The far corners are two to
+  three times farther than the near side, so two 6 mm cameras cover the
+  far half and two 4 mm cameras the near half. That keeps the ball at
+  8.6 px or more anywhere on 11v11 (9.8 px at the far corner, inside the
+  8-17 px range that `spike/evals/training_2026-09-23.md` found), where
+  an even split would give about 5-6 px. Players stay at 62 px or more,
+  and worst-case ground resolution is 0.25 m per pixel, from an 8 m mast
+  10 m back.
+- **Aim.** Far cameras 25.5 degrees either side of straight across and
+  4 degrees down; near cameras 40 degrees either side and 26 degrees
+  down. Nothing inside the lines drops out with up to 2 degrees of
+  aiming error, on masts from 6 m to 8 m.
+- **`hardware/README.md`** is the buying list, with sources: two
+  Milesight MS-C8164-PD (450 g, 4K30, 16 Mbps, manual shutter, IP67/IK10,
+  NDAA-compliant) per focal length keep the head near 2.9 kg, under the
+  4.5 kg rating of the 8 m carbon mast it ships on; a Ubiquiti USW-Flex
+  on the head means one PoE++ cable up the mast instead of four. It also
+  has the mechanical and electrical connections, print and assembly
+  steps, camera settings, the field routine, and what is not verified.
+- **`hardware/head/sideline_head.scad`** is the parametric OpenSCAD
+  head: four angled pads, a captive 3/8"-16 nut, a clamp collar, a
+  switch hood, a guy ring, and two small test prints for the parts that
+  need measuring against real hardware first. Binary STLs and preview
+  renders are checked in alongside it.
+- **`hardware/rig_geometry.py`** is the coverage and resolution
+  arithmetic itself: it draws a per-camera aim card and a coverage map
+  from the pipeline's own pitch model, so a card can be checked against
+  a camera's live view at setup. Cards for 11v11, 9v9 and 7v7 are in
+  `hardware/aim/`.
+- **`hardware/recorder/`** stream-copies the four cameras into
+  ten-minute clock-aligned segments, with a chrony config so all four
+  cameras and the recorder share one clock at the field.
+- **Nothing under `sideline/` changes.** Two gaps are recorded rather
+  than fixed: the pipeline takes one camera per match, and multi-camera
+  input is a SPEC non-goal, so four views need a stitch at ingest or
+  per-view registration merged on the pitch, which is a spec decision;
+  and `StaticRegistrar.register()` ignores the frame, so a bumped or
+  swaying mast would silently shift every coordinate after it.
