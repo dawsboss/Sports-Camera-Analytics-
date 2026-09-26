@@ -601,10 +601,11 @@ has been bought, built or filmed.
   hand-drawn MIPI pairs, ground via fan-out, routing, then finish and
   fab, run end to end by `build.sh` — and a from-scratch rebuild was
   checked to pass the same ERC and DRC.
-- **Freerouting 2.1.0 does not work here.** Run headless, it gave up on
-  79 connections and ignored `-mp`. 1.9.0, run in GUI mode under
-  `xvfb-run`, routes the board fully; its optimiser was switched off
-  after it ran past ten minutes.
+- **Freerouting 2.1.0 does not work here.** It left 79 connections
+  unrouted where 1.9.0 left 3, and run headless it ignores `-mp` and
+  does not stop. 1.9.0, run in GUI mode under `xvfb-run`, routes the
+  board fully; its optimiser was switched off after it ran past ten
+  minutes.
 - **In1 stays a solid ground plane under the MIPI pairs** for their
   whole run; In2 is kept solid under the pairs' short stretch on
   B.Cu, and carries some slow signals elsewhere, under a ground pour.
