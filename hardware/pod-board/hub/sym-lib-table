@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "sideline")(type "KiCad")(uri "${KIPRJMOD}/sideline.kicad_sym")(options "")(descr "Sideline camera hub symbols"))
+)

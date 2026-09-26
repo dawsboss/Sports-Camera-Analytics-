@@ -1,0 +1,4 @@
+(version 1)
+(rule "one spoke where the pad has its own ground via"
+  (condition "A.NetName == 'GND'")
+  (constraint min_resolved_spokes 1))

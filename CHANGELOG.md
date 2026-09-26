@@ -554,3 +554,69 @@ the pod is a second build to test, not a replacement yet.
   Reolinks have microphones, and a sideline microphone records the parents
   standing under it. It also documents the Reolink RTSP path
   (`PATH_MAIN=h265Preview_01_main`).
+
+## 0.1.13 — a camera hub board, designed and checked, not yet built
+
+A third way to build the rig, next to the open head and the hidden pod:
+one PCB that turns Antmicro's open-hardware Jetson Orin Baseboard into a
+four-camera recorder built from chosen parts, not repurposed security
+cameras. The IP domes cap each stream at 8 Mbps, do not publish a
+fastest shutter, depend on a motorised zoom returning after every
+power-up, and weigh about 2.4 kg on a mast rated for 4.5 kg; heads of
+our own trade that for a chosen bitrate, a 1/1000 s shutter, locked
+white balance, frame-synced sensors and a tilt sample per frame, at an
+estimated 0.9 kg. The schematic and board pass KiCad's own checks
+clean, and the coverage arithmetic that aimed the hidden pod finds no
+gap here either, in 300 trials with every camera 2 degrees off. Nothing
+has been bought, built or filmed.
+
+- **`hardware/pod-board/README.md`** lays out the system: Antmicro's
+  baseboard used as built except one resistor-array change (fit R122,
+  remove R108), carrying a Mixtile Core 3588E (RK3588) that records
+  four 4K H.265 streams to NVMe inside the pod. Four Sony IMX678 heads
+  run on Raspberry Pi 22-pin FFCs, through Commonlands CIL083 lenses
+  (far pair, 51 degrees, aimed ±24 degrees at 4 down) and CIL042 lenses
+  (near pair, 85 degrees, aimed ±40 degrees at 29 down), on one PoE++
+  (802.3bt) cable down the mast. First-unit cost is an estimate,
+  $1,300-2,200; the README also covers the buying list, wiring,
+  baseboard setup, cables, the recording and sync pipeline, power,
+  heat and weight, the pod changes it needs, and a build order with
+  pass conditions and what is not yet verified.
+- **`hardware/pod-board/hub/`** is the one new PCB, "Sideline camera
+  hub" rev A: KiCad 9, 84 x 52 mm, four layers, every part on one side.
+  It turns the baseboard's two 50-pin camera connectors into four
+  Pi-style 22-pin ports, with a load switch per head, an XVS/XHS
+  frame-sync bus through SN74AVC4T774 translators (one head as master,
+  or an external pulse on J3), an ICM-42688-P IMU with FSYNC tied to
+  the frame pulse, an SHT45, PCA9555 expanders and test points. The
+  schematic passes ERC clean (0 errors, 0 warnings) and the board
+  passes DRC with schematic-parity checked (0 violations, 0
+  unconnected pads, 0 footprint errors). `fab/` carries the Gerbers,
+  drill file, BOM, CPL, schematic and bottom-assembly PDFs and the
+  ERC/DRC reports; `renders/` the rendered views. The 50-pin footprint
+  and its 3D model are Antmicro's, from its OV5640 board, under
+  Apache-2.0 (`NOTICE`, `LICENSE-Apache-2.0.txt`); only the model path
+  and the mounting-pad numbering (MP) were changed. `gen/` is the
+  generator that built it all — netlist, schematic, placement,
+  hand-drawn MIPI pairs, ground via fan-out, routing, then finish and
+  fab, run end to end by `build.sh` — and a from-scratch rebuild was
+  checked to pass the same ERC and DRC.
+- **Freerouting 2.1.0 does not work here.** Run headless, it gave up on
+  79 connections and ignored `-mp`. 1.9.0, run in GUI mode under
+  `xvfb-run`, routes the board fully; its optimiser was switched off
+  after it ran past ten minutes.
+- **In1 stays a solid ground plane under the MIPI pairs** for their
+  whole run; In2 is kept solid under the pairs' short stretch on
+  B.Cu, and carries some slow signals elsewhere, under a ground pour.
+- **`hardware/rig_geometry.py`** gains a rectilinear lens model for the
+  low-distortion M12 lenses (under 1% TV, so f-theta would misstate
+  them), a `homebrew-678` head, and `--trials N`, which repeats the
+  coverage check N times with every camera's yaw and tilt off by up to
+  2 degrees and counts the trials that still leave a gap inside the
+  lines. The home-brew head puts the smallest ball on 11v11 at 8.0 px,
+  10.1 px at the far corner, with 0 of 300 trials leaving a gap.
+- **`hardware/pod-board/aim/`** carries aim cards and coverage maps for
+  11v11, 9v9 and 7v7, made the same way as the open head's and the
+  hidden pod's.
+- **`hardware/README.md`** points to the pod board as this third way
+  to build the rig.

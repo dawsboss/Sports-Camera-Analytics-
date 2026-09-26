@@ -19,6 +19,11 @@ There are two ways to build it, on the same mast, switch and recorder:
   pixels on the ball, at half the bitrate. Record one match on one of them
   before choosing it.
 
+A third way, **the pod board** (`pod-board/README.md`), replaces the IP
+cameras, the switch and the recorder: four IMX678 sensor heads and an
+RK3588 recorder in one sealed pod, on one PoE++ cable. It is designed and
+checked in KiCad, not built.
+
 ## What it sees
 
 `rig_geometry.py` projects every metre of the pitch through the four cameras

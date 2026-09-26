@@ -1,0 +1,459 @@
+# The pod board: our own cameras instead of the IP domes
+
+![The camera hub, rendered from its KiCad files](hub/renders/hub_bottom.png)
+
+Four small Sony IMX678 camera heads in one sealed pod. An RK3588
+module in the pod records all four 4K streams to an SSD, and one PoE++
+cable runs down the mast. It replaces the IP cameras that the Sideline
+Rig Brief (the rig's design doc of 25 September 2026) picks in Part 1,
+two Reolink RLC-843A domes and two RLC-820A turrets, and shrinks the
+brief's Part 3 pod around them. Against the rigs in `../README.md`, it
+replaces the cameras, the switch and the recorder.
+
+It is built from one open-hardware carrier and one new board:
+
+- **The carrier** is [Antmicro's Jetson Orin
+  Baseboard](https://github.com/antmicro/jetson-orin-baseboard). It is
+  built as it is, with one resistor array moved, and it carries a
+  [Mixtile Core 3588E](https://www.mixtile.com/core-3588e/) (RK3588).
+- **The camera hub** (`hub/`) is the new PCB. It turns the baseboard's
+  two 50-pin camera connectors into four Raspberry Pi 5 style camera
+  ports. It adds a power switch per camera, a frame-sync bus that makes
+  one camera the master, an IMU that samples on the frame pulse and a
+  humidity sensor.
+
+**State:** designed and checked in KiCad, and nothing bought, built or
+filmed. The hub's schematic passes ERC, and its board passes DRC and
+the schematic-parity check (see "The camera hub"). Every figure below
+is either sourced or marked as an estimate.
+
+## Why build it: smaller, lighter, and our settings
+
+| | Recommended IP set (brief, Part 1) | Pod board |
+| --- | --- | --- |
+| Cameras on the mast | 2.44 kg | about 0.1 kg: four heads with lenses (estimate) |
+| Whole rig on the mast | about 4.4 kg of a 4.5 kg rating | about 0.9 kg (estimate, see "Power, data, heat and weight") |
+| Pod | about 300 x 240 x 300 mm (design v2) | about 160 x 140 x 120 mm (estimate; not drawn yet) |
+| Bitrate per camera | 8 Mbps, the camera's maximum | our choice; plan 35 Mbps, test 20 to 50 |
+| Shutter | "manual", fastest step not published | set in the sensor: 1/1000 s |
+| White balance | whatever the firmware allows | fixed ISP gains for the match |
+| Lens | motorized zoom that must return after power-up | fixed M12 lenses, focus locked |
+| Frame sync | none | one XVS/XHS pulse drives all four sensors |
+| Mast tilt | not measured | an IMU sample tagged to every frame |
+| Smallest ball, 11v11 | 9.2 px | 8.0 px (middle of the near goal line) |
+| Ball at the far corner | 9.7 px | 10.1 px |
+| Cost of the first unit | $500 | roughly $1,300 to $2,200 (estimate, see "What to buy") |
+
+The bitrate decides it, as the brief says. An 8 Mbps stream is the
+first thing to smear a 9 px ball; here it is a setting.
+
+## What it sees
+
+`rig_geometry.py --head homebrew-678` models the heads: IMX678 at
+3840 x 2160, with Commonlands M12 lenses modelled rectilinear. The
+lens angles are Commonlands' own figures for each lens on the IMX678.
+The rig is an 8 m mast, 10 m behind the touchline, at halfway:
+
+| | 11v11 (100 x 64 m) | 9v9 (69 x 46 m) | 7v7 (55 x 37 m) |
+| --- | --- | --- | --- |
+| Smallest ball anywhere | 8.0 px | 10.4 px | 12.7 px |
+| Ball at the far corner | 10.1 px | 12.6 px | 15.2 px |
+| Smallest player | 61 px | 70 px | 85 px |
+| Worst foot position | 0.25 m per px | 0.13 | 0.09 |
+| Pitch + 2 m in frame, feet and heads | 100% | 100% | 100% |
+| Trials with a gap inside the lines, every camera up to 2 degrees off | 0 of 300 | 0 of 300 | 0 of 300 |
+
+| Camera | Lens | Horizontal angle on IMX678 | Yaw, L / R | Tilt down |
+| --- | --- | --- | --- | --- |
+| FAR-L, FAR-R | [Commonlands CIL083](https://commonlands.com/products/low-distortion-8mm-m12-lenses), 8.0 mm f/2.8, -0.5% TV distortion | 51 degrees | -24 / +24 | 4 |
+| NEAR-L, NEAR-R | [Commonlands CIL042](https://commonlands.com/products/no-distortion-4mm-m12-lens-cil042), 4.2 mm f/2.6, -0.7% TV distortion | 85 degrees | -40 / +40 | 29 |
+
+Aim cards and coverage maps for all three pitches are in `aim/`.
+
+![Which camera serves where, 11v11](aim/11v11/coverage.png)
+
+- **Why these aims.** A wider far pair (around 32 degrees of yaw) gets
+  the smallest ball up to 9.3 px. But it leaves the middle of the far
+  touchline to the near cameras' top edge, and 7 to 27% of the 2-degree
+  trials then lose it. The far pair turns in to overlap there instead.
+- **Where it gives up to the Reolinks.** Only the middle of each goal
+  line, near side, falls below 9 px: 0.9% of the pitch. The Reolinks'
+  near lens is a barrel-distorted security lens, which puts more pixels
+  in the middle of the frame than a low-distortion one. A barrel M12
+  lens of about 86 degrees would close the gap, but none with a
+  published IMX678 angle turned up.
+- **What was tried.** Nothing in Commonlands' IMX678 list sits at the
+  brief's 56 degrees. The 6.2 mm CIL062 (64 degrees) gives 7.9 px;
+  8.0 px is the best of the real lens pairs tried.
+
+## What to buy
+
+Prices were checked on 26 September 2026 where a source is linked, and
+the rest are estimates marked "about". Check before ordering.
+
+### Compute and carrier
+
+| Qty | Item | Price | Notes |
+| --- | --- | --- | --- |
+| 1 | [Antmicro Jetson Orin Baseboard](https://order.openhardware.antmicro.com/), rev 1.3.4 | $499, out of stock at CircuitHub | Or build it from the open files; see "Baseboard setup" for the one change |
+| 1 | [Mixtile Core 3588E](https://www.mixtile.com/store/som/core-3588e/), RK3588, 16 GB / 128 GB | between $132 (4 GB / 32 GB) and $338 (32 GB / 256 GB) | Jetson SO-DIMM module on 5 V; the 4 GB version should record, 16 GB leaves room |
+| 1 | NVMe SSD, M.2 key M, 1 TB | about $80-150 | Recording; the baseboard's M.2 slot |
+| 1 | Jetson Orin NX 16GB (fallback only) | $999 list | Drop-in if the RK3588 fails the bench test |
+
+### Camera heads
+
+| Qty | Item | Price | Notes |
+| --- | --- | --- | --- |
+| 4 | IMX678 camera board with a Raspberry Pi 22-pin connector and an M12 mount, e.g. [Soho Enterprise SE-SB03-IMX678](https://forums.raspberrypi.com/viewtopic.php?t=306964&start=50) | on request | It must bring out XVS and XHS for sync. Soho's boards sync "by XVS"; confirm XHS before ordering |
+| 2 | [Commonlands CIL083](https://commonlands.com/products/low-distortion-8mm-m12-lenses), 650 nm IR-cut | $19 each | Far pair |
+| 2 | [Commonlands CIL042](https://commonlands.com/products/no-distortion-4mm-m12-lens-cil042), F/2.6, 650 nm IR-cut | $49 each | Near pair; the F/2.6 version resolves 8 MP at 2 um |
+
+[StarlightEye](https://github.com/will127534/StarlightEye) (IMX585,
+C-mount) is the open-source alternative. It has twice the pixel area
+for dull days, and brings XVS and XHS out on U.FL. It also needs
+C-mount lenses of about 12 mm and 6 mm, which weigh several times the
+M12s. The hub serves either.
+
+### The hub and cables
+
+| Qty | Item | Price | Notes |
+| --- | --- | --- | --- |
+| 1 | Camera hub, this board, 4 layers, assembled one side | about $30-50 each in fives (estimate) | `hub/fab/` has the Gerbers, drill, BOM and placement files |
+| 2 | 50-pin 0.5 mm FFC, 100-150 mm | a few dollars | Baseboard J7 to hub J1, J8 to J2; pin N to pin N (see "Cables") |
+| 4 | 22-pin 0.5 mm FFC (Raspberry Pi 5 camera cable), 150-200 mm | about $3-5 each | Hub P1-P4 to the heads |
+| 4 | JST SH 4-pin leads, 150 mm | about $1 each | Sync, hub J4-J7 to each head's XVS/XHS |
+
+### Base station changes
+
+| Qty | Item | Notes |
+| --- | --- | --- |
+| 1 | IEEE 802.3bt PoE++ injector, 60 W, e.g. [TP-Link TL-POE170S](https://www.omadanetworks.com/us/business-networking/omada-accessory-poe-adapter/poe170s/), about $50 | Replaces the USW-Flex and the POE-50-60W injector. The baseboard's PD is 802.3bt (TPS2372-3) |
+
+The travel router, mini PC, power station, mast, guys and Cat6 run are
+unchanged from `../README.md`. The four camera patch cables and the
+switch go, and the mini PC now only previews, serves time and takes
+the offload.
+
+### First unit, all in (estimate)
+
+| Item | Low | High |
+| --- | --- | --- |
+| Baseboard | $499 | $499 |
+| Mixtile Core 3588E | $132 | $338 |
+| NVMe SSD, 1 TB | $80 | $150 |
+| Four IMX678 heads, at 250 to 900 RMB each ([retail range](https://knightli.com/en/2026/05/01/sony-imx-camera-module-guide/), not a quote) | $140 | $505 |
+| Four lenses | $136 | $136 |
+| Five hubs, assembled (the fab's minimum run) | $150 | $250 |
+| Cables | $30 | $40 |
+| PoE++ injector | $50 | $50 |
+| Pod: lid, windows, seals, gland, printing | $100 | $200 |
+| **Total** | **about $1,300** | **about $2,200** |
+
+The Orin NX fallback adds $999 if the RK3588 fails the bench test.
+
+## How it connects
+
+```
+ POD (8 m up)
+   NEAR-L   FAR-L    NEAR-R    FAR-R        IMX678 heads, M12 lenses
+     |         |        |         |          22-pin FFC + SH 4-pin sync lead each
+     +---P2----P1-------P4--------P3---+     (ports in board order, top view)
+     |        camera hub (hub/)         |     power switch per head, sync bus,
+     +--J1 (50-pin)------J2 (50-pin)---+     IMU, humidity
+          |                 |
+         J7                J8                 two 50-pin FFCs
+     Antmicro Jetson Orin Baseboard
+       + Mixtile Core 3588E (RK3588)          records to NVMe
+       RJ45, 802.3bt PD
+          |
+          |  one 15 m outdoor Cat6 down the mast
+          |
+ BASE CASE
+     802.3bt injector -- travel router 192.168.50.1 -- mini PC 192.168.50.2
+     power station                        |  Wi-Fi
+                                        phone (preview, aiming)
+```
+
+## The camera hub (`hub/`)
+
+![Hub copper, seen from the top: F.Cu in red (the MIPI pairs and a few slow signals), B.Cu in blue](hub/renders/hub_copper.png)
+
+The hub is 84 x 52 mm, four layers, with every part on one side (B.Cu,
+as on Antmicro's own camera boards).
+
+| Ref | Part | Job |
+| --- | --- | --- |
+| J1, J2 | Wurth 68715014522, 50-pin 0.5 mm | From baseboard J7 (CSI0 + CSI2) and J8 (CSI1 + CSI3); Antmicro's footprint |
+| P1-P4 | Hirose FH12-22S-0.5SH | FAR-L, NEAR-L, FAR-R, NEAR-R camera ports, Raspberry Pi 5 22-pin pinout, 2 lanes wired |
+| J4-J7 | JST SH 4-pin | Head sync: 1 XVS, 2 XHS, 3 GND, 4 VIO reference out (through 100 ohm) |
+| J3 | JST SH 4-pin | External sync in or out: 1 XVS, 2 GND, 3 XHS, 4 GND, at 3.3 V |
+| U3-U6 | TI TPS22917 | Per-head 3.3 V switch; 1 nF slows the turn-on, and a 100 ohm discharge resets a head properly |
+| U1, U2 | NXP PCA9555 | Head power, enables, sync direction and output enable; its pull-ups start every head powered, enabled and isolated |
+| U8, U9 | TI SN74AVC4T774 | XVS/XHS level shift (1.8 V heads, 3.3 V bus), direction per head, all isolated until set |
+| U10 | TDK ICM-42688-P | IMU at 0x69; FSYNC on the frame pulse tags the sample nearest each frame |
+| U11 | Sensirion SHT45 | Pod air temperature and humidity at 0x44 |
+| U7, JP1 | AP2112K-1.8, solder jumper | Sensor-side sync level: 1.8 V (default) or 3.3 V |
+| D1-D3 | Green 0603 LEDs | Status per expander (D1, D2), and 3.3 V present (D3) |
+| TP1-TP6 | 1 mm test pads | XVS, XHS, 3.3 V A, 3.3 V B, 1.8 V, ground |
+| H1-H3 | M2 mounting holes | Tracks and vias kept out from under the screw heads |
+
+**MIPI.** Each head gets three 100-ohm pairs: D0, D1 and the clock. The
+widths are 0.25 mm traces 0.25 mm apart on F.Cu, over a solid In1
+ground plane, and they come to about 100 ohms on JLCPCB's
+JLC04161H-7628 stackup. Confirm that with JLCPCB's calculator when
+ordering. The pairs drop to B.Cu only at the two connectors, and each
+drop has ground vias beside it. The 50-pin connector orders the lanes
+D1, D0, CLK and the Raspberry Pi orders them D0, D1, CLK, so one pair
+per head crosses. D1 drops to B.Cu about 8 mm above its port and passes
+under D0, the only place any pair leaves F.Cu mid-run.
+
+**Frame sync.** The heads' XVS and XHS meet on a 3.3 V bus. For each
+head, the expander sets its translator direction:
+
+- **High (default): the bus drives the head.** The head is a slave.
+- **Low: the head drives the bus.** It is the master.
+
+Make exactly one head the master, or none if something external drives
+J3 (a Pico, or a GNSS pulse). Then clear the output enable. The
+translators start isolated, so nothing fights at power-up. If a setting
+is wrong, 47 ohm and 33 ohm series resistors limit the fight.
+
+The bus's XVS reaches the SoM through J1 pin 32, the baseboard's
+VSYNC_CAM0 line (CAM0_PWDN), so every frame can be timestamped. It also
+reaches the IMU's FSYNC. The IMU's interrupt goes out on J1 pin 34.
+
+**I2C.** The baseboard's PI4MSD5V9548A mux gives each camera its own
+bus, pulled up to 3.3 V:
+
+| Mux channel | Baseboard pins | Hub devices | Head |
+| --- | --- | --- | --- |
+| 0 | J7 39/40 | U1 PCA9555 0x20, U10 IMU 0x69, U11 SHT45 0x44 | FAR-L (P1) |
+| 1 | J7 41/42 | none | NEAR-L (P2) |
+| 2 | J8 39/40 | U2 PCA9555 0x20 | FAR-R (P3) |
+| 3 | J8 41/42 | none | NEAR-R (P4) |
+
+**Expander bits** (U1 serves FAR-L and NEAR-L, U2 serves FAR-R and NEAR-R):
+
+| Bit | IO0_0 | IO0_1 | IO0_2 | IO0_3 | IO0_4 | IO0_5 | IO0_6 | IO0_7 | IO1_0 | IO1_1 | IO1_2 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Signal | FAR 3V3 on | FAR CAM_IO0 | FAR CAM_IO1 | FAR sync dir | NEAR 3V3 on | NEAR CAM_IO0 | NEAR CAM_IO1 | NEAR sync dir | sync OE (low = on) | status LED | IMU INT1 (U1 only) |
+
+**Layers.** F.Cu carries the MIPI pairs and a ground pour, over In1, a
+solid ground plane. In2 carries some slow signals and a ground pour,
+and stays solid under the pairs' short B.Cu runs. B.Cu carries the
+parts, most slow signals and a ground pour. Every ground pad has its
+own via into the planes.
+
+**Checks.** `hub/gen/fab.py` runs KiCad 9's own checks and rebuilds
+`hub/fab/`: ERC on the schematic, and DRC with the schematic-parity
+check on the board. As committed, ERC finds no errors or warnings, and
+DRC finds no violations, no unconnected pads and no parity errors
+(`hub/fab/erc.rpt`, `hub/fab/drc.rpt`). The generator in `hub/gen/`
+placed the parts, drew the MIPI pairs, gave every ground pad its via,
+and had Freerouting 1.9.0 route the rest. Edit the KiCad files from
+here on: the generator is a record of how rev A was made, and
+rerunning it (`hub/gen/build.sh`) overwrites hand edits. The autorouter
+is not deterministic, so a rerun routes the slow signals a little
+differently; a rebuild from scratch was checked and passes the same
+checks.
+
+## Baseboard setup
+
+Four 2-lane cameras need one change and one check on the baseboard.
+
+- **Move R108 to R122.** As shipped, R108 sends CSI3's lanes to J7 as
+  lanes 2 and 3 of a 4-lane camera, and R122 (not fitted) would send
+  them to J8. Fit R122, remove R108, and J8 carries two 2-lane cameras
+  like J7 (`csi.kicad_sch`). Order the board that way, or rework the
+  0201 array by hand.
+- **The GPIO lines.** J7 pins 32 and 34 carry the hub's frame pulse
+  and IMU interrupt to the module's CAM0_PWDN and CAM1_PWDN through
+  R12 and R11, fitted as shipped. J8 pin 32 carries the expanders'
+  interrupt, which reaches the module's GPIO12 only if R4 (not fitted)
+  is added; the software can poll the expanders instead. Both pairs
+  pass NXP NTS0102 auto-direction translators (U31, U32), so the hub
+  can drive them.
+- **Module power.** Rev 1.3.x feeds the module 12 V or 5 V according to
+  MODULE_ID. The Mixtile module ties that pin to ground (Mixtile's pin
+  comparison table), which should select the 5 V rail. Measure VDD_SoM
+  at the socket before fitting the module: it must read 5 V.
+- **RTC.** BT1 is an MS621FE, a rechargeable cell, so the module's PMIC
+  may charge it.
+- **I2C pull-ups** go to 3.3 V as shipped (R166, R174 fitted), which is
+  what Raspberry Pi style heads expect.
+
+## Cables
+
+- **50-pin.** Baseboard J7 pin N must reach hub J1 pin N, and J8 must
+  reach J2 the same way. The hub mounts its 50-pin connectors like
+  Antmicro's own camera boards: underside, same footprint, turned
+  180 degrees so the cable leaves the top edge. So the FFC type
+  Antmicro uses with those boards, laid the same way, maps pin to pin.
+  A fold in the pod flips which cable type is needed. Check pins 1, 11
+  and 50 with a meter before power.
+- **22-pin.** The hub's ports are pinned like a Raspberry Pi 5's, so a
+  head that works on a Pi 5 works here. Contacts sit on the underside
+  (bottom-contact FH12), so check the head end's contact side before
+  buying cables.
+- **Sync.** Soho-style heads with XVS/XHS pads need a JST SH lead
+  soldered to the pads. StarlightEye needs an SH to 2x U.FL lead. Pin 4
+  of the hub's SH is a reference voltage, not power, so leave it
+  unconnected unless the head needs a level to pull XMASTER to.
+
+## Recording
+
+The software is not written yet; this is what it has to be. Per head:
+
+```
+sensor (IMX678 driver, slave or master) -> rkcif -> rkisp (rkaiq 3A, fixed exposure and white balance)
+  -> Rockchip MPP H.265 encoder -> ten-minute MKV segments on the NVMe, cut on the clock like record.sh
+```
+
+The starting pipeline to bench-test, one per head:
+
+```
+gst-launch-1.0 -e v4l2src device=/dev/video-far-l io-mode=dmabuf \
+  ! video/x-raw,format=NV12,width=3840,height=2160,framerate=25/1 \
+  ! mpph265enc rc-mode=vbr bps=35000000 bps-max=40000000 gop=25 \
+  ! h265parse ! splitmuxsink muxer=matroskamux max-size-time=600000000000 location=/data/rec/far-l_%05d.mkv
+```
+
+- **Capture.** GStreamer rather than ffmpeg. The RK3588 camera path
+  exposes only the V4L2 multi-planar API, which stock ffmpeg does not
+  capture.
+- **Rate control.** MPP's CBR is reported not to hold a fixed bitrate on
+  RK3588, so start with capped VBR and measure it
+  ([rockchip-linux/mpp #429](https://github.com/rockchip-linux/mpp/issues/429)).
+
+| Setting | Value |
+| --- | --- |
+| Resolution, rate | 3840 x 2160, 25 fps (the bench test decides whether 30 fits) |
+| Codec | H.265, a keyframe every second |
+| Bitrate | 35 Mbps per head to start; test 20, 35 and 50 on real footage |
+| Exposure | Manual, 1/1000 s, gain capped |
+| White balance | Fixed gains for the match, the same on all four |
+| Off | Lens correction, stabilisation, crop, HDR, 3D noise reduction above low |
+| Time | chrony against the mini PC (192.168.50.2); the module's RTC holds it otherwise |
+| Preview | One low-resolution stream per head over RTSP, scaled by the RGA |
+
+Sync bring-up, on the FAR-L bus (mux channel 0) and the FAR-R bus (channel 2):
+
+1. **Outputs.** First write the output registers 0x02 and 0x03 with the
+   pull-up defaults (0xFF, 0x03), so nothing glitches. Then write 0x00
+   to configuration register 0x06 and 0xFC to 0x07. That makes port 0
+   and IO1_0-IO1_1 outputs and leaves IO1_2 an input: on U1 it is the
+   IMU's push-pull interrupt.
+2. **Master.** Set FAR-L's sync direction (U1 IO0_3) low and the other
+   three high. Put FAR-L's sensor in master mode and the rest in slave
+   mode.
+3. **Enable.** Clear OE (IO1_0) on both expanders.
+4. **Check.** Count XVS edges on TP1 and on the SoM's frame-pulse GPIO:
+   25 per second.
+
+## Power, data, heat and weight
+
+Estimates, all of them, until the bench test measures them.
+
+| | Figure | Basis |
+| --- | --- | --- |
+| Power in the pod | about 12-18 W | RK3588 encoding four streams 6-10 W, four sensors about 2 W, NVMe 2-3 W writing, conversion losses |
+| PoE budget | 51 W at the PD | 802.3bt Type 3 (TPS2372-3); an Orin NX fallback at 25 W still fits |
+| Data | 140 Mbps at 35 Mbps a head | 63 GB an hour; 95 GB for 90 minutes; a 1 TB SSD holds about ten matches |
+| Offload | about 16 minutes a match | 95 GB over gigabit Ethernet to the mini PC |
+| Heat | about 600 cm2 of finned lid for a 20 C rise | 15 W, still air plus radiation at about 12 W per m2 per C; sun on a white lid adds a few watts |
+| Weight on the mast | about 0.9 kg | Heads and lenses 0.1, baseboard, module, SSD and hub 0.1, finned aluminium lid 0.2, printed shell and frame 0.35, windows, seals, gland and screws 0.15 |
+
+## The pod: what changes from design v2
+
+The CAD re-fit is not done; it waits on real heads to measure, as
+Part 3 always did. These are the rules it follows.
+
+- **Sealed, not a rain screen.** The IP cameras were weatherproof and
+  these boards are not. So the pod gets:
+  - an O-ring on every seam and window;
+  - an ePTFE vent and desiccant;
+  - a conformal coat on the hub;
+  - a cable gland for the Cat6.
+- **The lid is the heatsink.** The module faces up against the finned
+  aluminium lid through a gap pad, and the lid shades everything below
+  it. Size the lid before the shell.
+- **Windows.** Four anti-reflection glass ports sit in front of the M12
+  lenses. Each has a matte black rim and room for 5 degrees of trim
+  either way, as in design v2's flush-window rules.
+- **Seats.** The heads bolt to printed seats that carry the aims in the
+  table above: far pair +/-24 degrees yaw at 4 down, near pair
+  +/-40 degrees at 29 down. The aims differ from design v2's, so
+  `sideline_pod.scad`'s seats and windows move. `check_pod.py`'s view
+  checks apply unchanged.
+- **Unchanged.** The mast stud, the tether, the guy lines and the aim
+  cards all stay.
+
+## Build order
+
+Prove the risky parts on the bench before ordering anything big; each
+step has a pass condition.
+
+| Step | Work | Pass condition |
+| --- | --- | --- |
+| 1. Bench worst case | Two IMX678 heads on one RK3588 ISP at 4K25 (any RK3588 board with two camera ports), locked exposure and white balance, 35 Mbps each | 90 minutes, no dropped frames, recorded bitrate within 10% of the target |
+| 2. Field A/B | One head beside an RLC-843A at a real match; `spike/evals/ball_recall.py` on both | Fewer and shorter ball gaps than the Reolink |
+| 3. Hub and baseboard | Order two hubs and one baseboard (R122 fitted); bring up all four ports; set a master | Four synced streams for a full match; XVS on every head within 1 us |
+| 4. Pod | Re-fit `sideline_pod.scad`, print, seal, aim with the cards in `aim/` | `check_pod.py` passes; each view matches its card; lid under 60 C in sun |
+
+## Not verified yet
+
+- **The hub is a design, not a board.** Its checks pass, but no copper
+  has been made, and nobody has put the MIPI pairs on a scope. The
+  impedance is a formula estimate for JLCPCB's stackup. The slow
+  signals are autorouted and correct by DRC, not tidied by hand.
+- **The fab files are unordered.** The placement file's rotations are
+  KiCad's; check every part in the fab's placement preview, since
+  bottom-side parts often need correcting. The BOM names manufacturer
+  parts for the ICs, connectors and LEDs, and values for the passives;
+  it has no LCSC numbers yet.
+- **The FFC mapping.** The 50-pin orientation copies Antmicro's
+  arrangement, and the reasoning is written above, but no cable has
+  been checked.
+- **Four 4K cameras on one RK3588.** Two cameras sharing an ISP are
+  capped at 3840 x 2160 each and need rkisp_3A_server. That is exactly
+  this load, and it is the bench test.
+- **The heads.** Soho Enterprise's IMX678 boards are samples, stock is
+  short, and whether XHS comes out is unconfirmed. Khadas runs IMX678 at
+  4K on RK3588S, so a driver exists to port. An IQ tuning file for these
+  lenses does not.
+- **The lens angles** are Commonlands' figures, not measured on these
+  sensors.
+- **MODULE_ID and the 5 V rail**, as above: measure before fitting the
+  module.
+- **Heat** in a sealed pod in sun, and **weight**, are estimates.
+- **The pipeline still takes one camera per match**, as `../README.md`
+  says.
+
+## Files
+
+| Path | What |
+| --- | --- |
+| `hub/sideline-cam-hub.kicad_pro`, `.kicad_sch`, `.kicad_pcb`, `.kicad_dru` | The camera hub, KiCad 9, and its one custom design rule (one thermal spoke is enough where a ground pad has its own via) |
+| `hub/sideline.kicad_sym`, `hub/sideline.pretty/`, `hub/sideline.3dshapes/` | Two symbols KiCad lacks, and Antmicro's 50-pin footprint and model (Apache-2.0; see `hub/NOTICE`) |
+| `hub/fab/` | Gerbers and drill (zipped), BOM, placement, schematic PDF, bottom assembly drawing, ERC and DRC reports |
+| `hub/renders/` | Board renders |
+| `hub/gen/` | How rev A was generated: netlist, schematic, placement, MIPI routing, autorouting; `build.sh` runs it all |
+| `aim/` | Aim cards and coverage maps for the homebrew head, three pitch sizes |
+| `../rig_geometry.py --head homebrew-678` | The numbers in "What it sees" |
+
+## Sources
+
+- [Antmicro Jetson Orin Baseboard](https://github.com/antmicro/jetson-orin-baseboard): schematic, layout and board overview
+- [Antmicro baseboard on CircuitHub](https://order.openhardware.antmicro.com/) ($499, rev 1.3.4) and [on System Designer](https://antmicro.com/blog/2026/06/antmicro-baseboard-for-jetson-orin-on-system-designer)
+- [Antmicro OV5640 dual camera board](https://github.com/antmicro/ov5640-dual-camera-board): the 50-pin connector's pin use and footprint
+- [Mixtile Core 3588E](https://www.mixtile.com/core-3588e/), its [store page](https://www.mixtile.com/store/som/core-3588e/), [data sheet](https://www.mixtile.com/app/uploads/2024/05/Mixtile-Core-3588E-Data-Sheet_v1.3.pdf) and [pin comparison with Jetson](https://downloads.mixtile.com/core3588e/file/CORE3588E_Pin_Function_Comparision_with_Jetson_rev01.pdf)
+- [Turing RK1 specifications](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports): another RK3588 module on the same socket
+- [Commonlands IMX678 lens guide](https://commonlands.com/pages/image-sensors/imx678), [CIL083](https://commonlands.com/products/low-distortion-8mm-m12-lenses), [CIL042](https://commonlands.com/products/no-distortion-4mm-m12-lens-cil042)
+- [Soho Enterprise IMX678 boards (Raspberry Pi forum thread)](https://forums.raspberrypi.com/viewtopic.php?t=306964&start=50)
+- [StarlightEye](https://github.com/will127534/StarlightEye): open IMX585 board, ICM-42688-P wiring, sync on U.FL
+- [FRAMOS: multi-sensor synchronization](https://docs.framos.com/en/latest/FSMEcosystem/ApplicationGuides/MultiSensorSynchronization.html): IMX678 master/slave with XVS and XHS
+- [Khadas Edge2 cameras](https://docs.khadas.com/products/sbc/edge2/add-ons/imx415-mipi-camera): IMX678 and IMX585 at 4K on RK3588S
+- [TI SN74AVC4T774](https://www.ti.com/lit/ds/symlink/sn74avc4t774.pdf), [TI TPS22917](https://www.ti.com/lit/ds/symlink/tps22917.pdf), [NXP PCA9555](https://www.ti.com/lit/ds/symlink/pca9555.pdf) (TI's equivalent sheet)
+- [TDK EV_ICM-42688-P board note](https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/8927/EV_ICM-42688-P.pdf): the IMU's pin-out
+- [rockchip-linux/mpp issue 429](https://github.com/rockchip-linux/mpp/issues/429): CBR on RK3588
+- [TP-Link TL-POE170S](https://www.omadanetworks.com/us/business-networking/omada-accessory-poe-adapter/poe170s/): 802.3bt injector

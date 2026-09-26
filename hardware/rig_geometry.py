@@ -11,13 +11,21 @@ each part of the pitch.
     python hardware/rig_geometry.py                          # 8 m mast, 10 m back, 100 x 64
     python hardware/rig_geometry.py --mast 7.4 --setback 9 --length 69 --width 46 --out aim/
     python hardware/rig_geometry.py --head reolink-833a      # the hidden pod's cameras
+    python hardware/rig_geometry.py --head homebrew-678 --trials 300   # the pod board's heads
 
-Lenses are modelled f-theta with the datasheet fields of view: the Milesight
-MS-C8164-PD's, whose H:V ratios match 16:9 f-theta within two degrees, or
-the Reolink RLC-833A's zoom at the pod's two settings.
+Security-camera lenses are modelled f-theta with the datasheet fields of
+view: the Milesight MS-C8164-PD's, whose H:V ratios match 16:9 f-theta
+within two degrees, or the Reolink RLC-833A's zoom at the pod's two
+settings. The homebrew heads' M12 lenses are low-distortion (under 1% TV),
+so they are modelled rectilinear, with the horizontal field of view the
+lens maker publishes for that lens on the IMX678.
 Real lenses bend straight lines a little differently near the edges, so a
 card is good for aiming to a degree or two, not for calibration: the
 pitch mapping itself always comes from clicked landmarks (M10).
+
+`--trials N` repeats the coverage check N times with every camera's yaw and
+tilt off by up to 2 degrees, and counts the trials that leave a gap inside
+the lines: the robustness figure the rig brief quotes.
 
 Frame: metres, origin at the centre spot, x along the length, y across,
 z up; the camera stands on the y < 0 touchline (the pipeline's default
@@ -37,14 +45,25 @@ import numpy as np
 # the Milesight MS-C8164-PD's fixed lenses, and the Reolink RLC-833A's zoom
 # at the two settings the pod uses. Its sheet gives 94 x 53 at the wide end
 # and 50 x 30 at the long end; the vertical here is interpolated between.
+#
+# The homebrew heads (hardware/pod-board) put Commonlands M12 lenses on a
+# Sony IMX678, 3840 x 2160 at 2.0 um. The horizontal angles are Commonlands'
+# own figures for each lens on the IMX678 (its IMX678 lens guide); the
+# verticals follow from a rectilinear lens on a 16:9 sensor.
 LENSES = {"2.8mm": (110.0, 60.0), "4mm": (91.0, 50.0), "6mm": (55.0, 32.0),
-          "833A@54": (54.0, 32.1), "833A@84": (84.0, 47.8)}
+          "833A@54": (54.0, 32.1), "833A@84": (84.0, 47.8),
+          "CIL083": (51.0, 30.04), "CIL042": (85.0, 54.54)}
+RECTILINEAR = {"CIL083", "CIL042"}
 W_PX, H_PX = 3840, 2160
 
 # Each head's aims: yaw from straight across the pitch, positive to the
 # right; tilt down. "milesight" is the open printed head
 # (hardware/head/sideline_head.scad), "reolink-833a" the hidden pod
-# (hardware/pod/sideline_pod.scad).
+# (hardware/pod/sideline_pod.scad), "homebrew-678" the pod board's own
+# heads (hardware/pod-board). Its aims are the best found that keep every
+# trial gap-free with all four cameras 2 degrees off: the far pair turns in
+# to overlap at the far touchline, because the near pair's top edge is too
+# easily lost there.
 HEADS = {
     "milesight": (
         ("FAR-L", -25.5, 4.0, "6mm"),
@@ -57,6 +76,12 @@ HEADS = {
         ("FAR-R", 26.0, 4.0, "833A@54"),
         ("NEAR-L", -39.0, 27.0, "833A@84"),
         ("NEAR-R", 39.0, 27.0, "833A@84"),
+    ),
+    "homebrew-678": (
+        ("FAR-L", -24.0, 4.0, "CIL083"),
+        ("FAR-R", 24.0, 4.0, "CIL083"),
+        ("NEAR-L", -40.0, 29.0, "CIL042"),
+        ("NEAR-R", 40.0, 29.0, "CIL042"),
     ),
 }
 COLOURS = {"FAR-L": (200, 120, 40), "FAR-R": (60, 170, 230), "NEAR-L": (90, 180, 90), "NEAR-R": (60, 90, 220)}  # BGR
@@ -72,8 +97,13 @@ class Camera:
 
     def __post_init__(self) -> None:
         hfov, vfov = LENSES[self.lens]
-        self.f = W_PX / math.radians(hfov)                      # pixels per radian
-        self.h = int(round(self.f * math.radians(vfov)))
+        self.rectilinear = self.lens in RECTILINEAR
+        if self.rectilinear:
+            self.f = (W_PX / 2) / math.tan(math.radians(hfov) / 2)          # pixels at unit tangent
+            self.h = int(round(2 * self.f * math.tan(math.radians(vfov) / 2)))
+        else:
+            self.f = W_PX / math.radians(hfov)                      # pixels per radian
+            self.h = int(round(self.f * math.radians(vfov)))
         y, t = math.radians(self.yaw), math.radians(self.tilt)
         self.fwd = np.array([math.sin(y) * math.cos(t), math.cos(y) * math.cos(t), -math.sin(t)])
         right = np.cross(self.fwd, [0.0, 0.0, 1.0])
@@ -85,10 +115,16 @@ class Camera:
         d = P - self.pos
         d = d / np.linalg.norm(d, axis=-1, keepdims=True)
         xc, yc, zc = d @ self.right, d @ self.down, d @ self.fwd
-        theta = np.arccos(np.clip(zc, -1, 1))
-        phi = np.arctan2(yc, xc)
-        uv = np.stack([W_PX / 2 + self.f * theta * np.cos(phi), self.h / 2 + self.f * theta * np.sin(phi)], -1)
-        ok = (theta < math.radians(95)) & (uv[:, 0] >= 0) & (uv[:, 0] < W_PX) & (uv[:, 1] >= 0) & (uv[:, 1] < self.h)
+        if self.rectilinear:
+            zs = np.where(zc > 1e-6, zc, 1e-6)
+            uv = np.stack([W_PX / 2 + self.f * xc / zs, self.h / 2 + self.f * yc / zs], -1)
+            front = zc > 0.05
+        else:
+            theta = np.arccos(np.clip(zc, -1, 1))
+            phi = np.arctan2(yc, xc)
+            uv = np.stack([W_PX / 2 + self.f * theta * np.cos(phi), self.h / 2 + self.f * theta * np.sin(phi)], -1)
+            front = theta < math.radians(95)
+        ok = front & (uv[:, 0] >= 0) & (uv[:, 0] < W_PX) & (uv[:, 1] >= 0) & (uv[:, 1] < self.h)
         return uv, ok
 
 
@@ -154,6 +190,20 @@ def coverage(cams: list[Camera], xy: np.ndarray, head_h: float = 1.8) -> float:
     return float(ok.reshape(2, -1).all(axis=0).mean())
 
 
+def aim_trials(args: argparse.Namespace, n: int, err: float = 2.0, seed: int = 0) -> int:
+    """How many of n trials, each camera's yaw and tilt off by up to `err`
+    degrees, leave some point inside the lines out of every view."""
+    rng = np.random.default_rng(seed)
+    pos = np.array([0.0, -args.width / 2 - args.setback, args.mast])
+    xy = grid(args.length, args.width, 0.0, 1.0)
+    gaps = 0
+    for _ in range(n):
+        cams = [Camera(name, pos, yaw + rng.uniform(-err, err), tilt + rng.uniform(-err, err), lens)
+                for name, yaw, tilt, lens in HEADS[args.head]]
+        gaps += coverage(cams, xy) < 1.0
+    return gaps
+
+
 def report(args: argparse.Namespace) -> tuple[list[Camera], np.ndarray, dict[str, np.ndarray]]:
     cams = rig(args.mast, args.setback, args.width, args.head)
     xy = grid(args.length, args.width, 0.0, 1.0)
@@ -170,6 +220,9 @@ def report(args: argparse.Namespace) -> tuple[list[Camera], np.ndarray, dict[str
     print(f"  smallest player {np.nanmin(m['player']):.0f} px; worst foot position {np.nanmax(m['m_per_px']):.2f} m per pixel")
     for i, c in enumerate(cams):
         print(f"  {c.name:<6} {c.lens:<5} yaw {c.yaw:+5.1f} tilt {c.tilt:4.1f}: serves {np.mean(m['cam'] == i) * 100:4.1f}% of the pitch")
+    if args.trials:
+        gaps = aim_trials(args, args.trials)
+        print(f"  trials with a gap inside the lines, every camera up to 2 degrees off: {gaps} of {args.trials}")
     return cams, xy, m
 
 
@@ -253,7 +306,7 @@ def coverage_map(cams: list[Camera], length: float, width: float, m: dict[str, n
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--head", choices=sorted(HEADS), default="milesight",
-                    help="milesight: the open head; reolink-833a: the hidden pod")
+                    help="milesight: the open head; reolink-833a: the hidden pod; homebrew-678: the pod board's heads")
     ap.add_argument("--mast", type=float, default=8.0, help="camera height above the grass, metres")
     ap.add_argument("--setback", type=float, default=10.0, help="mast distance behind the touchline, metres")
     ap.add_argument("--length", type=float, default=100.0)
@@ -262,6 +315,8 @@ def main() -> None:
     ap.add_argument("--ball", type=float, default=0.22, help="ball diameter, m (size 4: 0.205)")
     ap.add_argument("--player", type=float, default=1.6, help="player height, m")
     ap.add_argument("--out", type=Path, help="write aim cards and a coverage map here")
+    ap.add_argument("--trials", type=int, default=0,
+                    help="also count, over this many trials with every camera up to 2 degrees off, those leaving a gap inside the lines")
     args = ap.parse_args()
     cams, xy, m = report(args)
     if args.out:

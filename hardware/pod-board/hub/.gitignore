@@ -1,0 +1,8 @@
+# KiCad's per-user and scratch files
+*.kicad_prl
+*-backups/
+fp-info-cache
+_autosave-*
+~*.lck
+# route.py's Specctra exchange files and Freerouting's own files
+route/
