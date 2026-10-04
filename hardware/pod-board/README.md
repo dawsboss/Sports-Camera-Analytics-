@@ -123,7 +123,9 @@ M12s. The hub serves either.
 | 4 | 22-pin 0.5 mm FFC (Raspberry Pi 5 camera cable), 150-200 mm | about $3-5 each | Hub P1-P4 to the heads |
 | 4 | JST SH 4-pin leads, 150 mm | about $1 each | Sync, hub J4-J7 to each head's XVS/XHS |
 
-### Base station changes
+### Base station changes (fixed install on PoE only)
+
+A battery pod needs no base case. This is for a pod on PoE.
 
 | Qty | Item | Notes |
 | --- | --- | --- |
@@ -133,6 +135,16 @@ The travel router, mini PC, power station, mast, guys and Cat6 run are
 unchanged from `../README.md`. The four camera patch cables and the
 switch go, and the mini PC now only previews, serves time and takes
 the offload.
+
+### Battery parts (to price once the power board is designed)
+
+| Qty | Item | Notes |
+| --- | --- | --- |
+| 1 | Power board, this project's, to build | USB-C PD charging, power path, temperature, fuel gauge; see "Power: battery first" |
+| 1 | 4S battery pack with its own BMS, 99 Wh or less | Li-ion or LiFePO4; sized from step 1's measured watts |
+| 2 | IP67 USB-C panel ports with caps | CHARGE and DATA |
+| 1 | Wi-Fi card for an access point in the pod | M.2 or USB |
+| 1 | USB-C SSD, 1-2 TB | The offload target |
 
 ### First unit, all in (estimate)
 
@@ -154,6 +166,30 @@ $800-1,100 with a second RK3588, or about $2,300-2,600 with two Orin NX
 modules in place of the RK3588s (see "If one module is not enough").
 
 ## How it connects
+
+There are two ways to power and empty the pod (see "Power: battery
+first, PoE for a fixed install"). **Battery is the main one**, as a Veo
+is: it needs no cable down the mast, no base case, and nothing for a
+parent to set up but the mast. PoE is for a pod left in place at a
+home ground.
+
+Battery, the default:
+
+```
+ POD (8 m up)
+   four heads -- camera hub -- baseboard + RK3588, records to NVMe
+                                  |   J12 (9-20 V DC in)    Wi-Fi access point
+                              power board (to build)          |
+                                  |                          phone (preview, aiming,
+                              battery pack, 99 Wh            battery %, start/stop)
+   two capped IP67 USB-C ports in the shell:
+     CHARGE -> power board            DATA -> baseboard USB-C, 10 Gbps
+```
+
+At home: a USB-C laptop charger on CHARGE, and a USB-C SSD on DATA,
+which the pod fills on its own.
+
+PoE, for a fixed install:
 
 ```
  POD (8 m up)
@@ -428,9 +464,102 @@ Estimates, all of them, until the bench test measures them.
 | Power in the pod | about 12-18 W | RK3588 encoding four streams 6-10 W, four sensors about 2 W, NVMe 2-3 W writing, conversion losses |
 | PoE budget | 51 W at the PD | 802.3bt Type 3 (TPS2372-3); with the two-board fallback, each board has its own PD and its own 51 W |
 | Data | 140 Mbps at 35 Mbps a head | 63 GB an hour; 95 GB for 90 minutes; a 1 TB SSD holds about ten matches |
-| Offload | about 16 minutes a match | 95 GB over gigabit Ethernet to the mini PC |
+| Offload | about 2-4 minutes a match to a USB-C SSD; about 16 over gigabit Ethernet (fixed install) | 95 GB |
+| Battery | 2-3 matches on 99 Wh | 26-40 Wh a match; see "Power: battery first" |
 | Heat | about 600 cm2 of finned lid for a 20 C rise | 15 W, still air plus radiation at about 12 W per m2 per C; sun on a white lid adds a few watts |
-| Weight on the mast | about 0.9 kg | Heads and lenses 0.1, baseboard, module, SSD and hub 0.1, finned aluminium lid 0.2, printed shell and frame 0.35, windows, seals, gland and screws 0.15 |
+| Weight on the mast | about 0.9 kg on PoE; about 1.5-1.8 kg with the battery | Heads and lenses 0.1, baseboard, module, SSD and hub 0.1, finned aluminium lid 0.2, printed shell and frame 0.35, windows, seals, gland and screws 0.15; a 99 Wh pack 0.6 (Li-ion) to 0.9 (LiFePO4) |
+
+## Power: battery first, PoE for a fixed install
+
+The pod should be as easy as a Veo: charge it, put it up, press one
+button, bring it home, plug in. So the battery is the main power, and
+USB-C is how it charges and how the footage comes out. PoE stays, for a
+pod mounted permanently at one ground, where a cable is no burden.
+
+**What the baseboard already gives**
+([Antmicro's board overview](https://antmicro.github.io/jetson-orin-baseboard/board_overview.html)):
+
+- **J12, a locking DC input** that takes 9-20 V (rev 1.3.0 and later).
+  Antmicro names a battery pack as a valid source. A 4S Li-ion pack
+  (12-16.8 V) and a 4S LiFePO4 pack (10-14.6 V) both fit.
+- **No charging.** In Antmicro's words, "battery (re-)charging is
+  currently not supported in the design." That is the power board's job.
+- **J4, a USB-C port** with 10 Gbps data and USB PD. Its TPS65988
+  controller is configured as a power sink on CircuitHub-built boards,
+  20 V recommended. It can run the board from a laptop charger, but it
+  cannot charge a battery.
+- **J6, 802.3bt PoE**, up to 60 W: the fixed-install path, unchanged.
+
+**The battery** (estimates until the bench test measures the pod's real
+draw):
+
+| | One RK3588 (12-18 W) | Two-board fallback (22-45 W) |
+| --- | --- | --- |
+| Energy per match, about 2 hours with setup | 26-40 Wh | 45-90 Wh |
+| Matches on a 99 Wh pack | 2-3 | 1, sometimes 2 |
+| Pack weight, Li-ion / LiFePO4 | about 0.6 / 0.9 kg | same |
+| Charge time at 60 W / 100 W | about 2 / 1.3 hours | same |
+
+- **99 Wh** is the most that flies as carry-on without airline approval.
+- **Weight.** The pod on the mast grows from about 0.9 kg to about
+  1.5-1.8 kg, well inside the mast's 4.5 kg rating.
+- **Heat is the battery's real risk.** Li-ion is rated to discharge up
+  to about 60 C and charge between 0 and 45 C, and the lid's target is
+  "under 60 C" in sun. So:
+  - the pack sits at the bottom of the pod, shaded, away from the module;
+  - it never charges while hot or below freezing;
+  - the power board stops discharge on an over-temperature.
+
+  LiFePO4 is heavier but more tolerant, and safer in a sealed box over a
+  youth pitch; the choice waits on the pod's measured temperatures.
+
+**The power board (to build).** A small PCB designed in KiCad as the
+hub was, between the pack and the baseboard's J12. It is on the build
+order below. It must:
+
+- **Charge from USB-C PD**: a standalone PD sink controller asking for
+  20 V, up to 100 W, from any laptop charger.
+- **Charge the pack with power path** through a 1-4S buck-boost charger
+  (TI's BQ25798 is the class of part; confirm its current limit against
+  the pack). The baseboard then runs from the charger while it is
+  plugged in. Plugging or unplugging must never drop the baseboard, so
+  the pod can record or offload while charging.
+- **Watch temperature**:
+  - NTC thermistors on the pack, on the charger's temperature pins, with
+    a JEITA charge profile: no charging outside 0-45 C;
+  - a second sensor near the module;
+  - a hard cut-off of discharge above the pack's rating;
+  - both temperatures readable over I2C, alongside the hub's SHT45.
+- **Gauge the pack**: a fuel gauge, read over I2C, so the phone shows
+  battery percent and minutes left.
+- **Shut down cleanly**: a low-battery signal to a module GPIO, so the
+  recorder closes its segments before the power goes.
+- **Give the controls a parent needs**: one power button and a few
+  LEDs (battery, recording, offload done).
+- **Stay out of PoE's way**: in a fixed install, PoE powers the
+  baseboard and the power board must not back-feed it. How the
+  baseboard combines J6, J12 and J4 has to be read from its schematic
+  first.
+- **Leave cell protection to the pack**: buy a pack with its own BMS,
+  and do not put one on this board.
+
+**Getting the footage out.** A match is about 95 GB.
+
+| Way | Time per match | State |
+| --- | --- | --- |
+| The pod copies to a USB-C SSD plugged into DATA | about 2-4 min | Ordinary USB host mode; the default |
+| The pod shows up as a drive on a laptop | about the same | Needs J4's lines to reach an RK3588 controller that can be a USB device, which the Jetson pin map does not settle |
+| Gigabit Ethernet, fixed install | about 16 min | As before |
+| Wi-Fi | about 30-50 min | Last resort |
+
+**Without a base case**, two jobs move into the pod:
+
+- **Preview.** A Wi-Fi access point in the pod (an M.2 or USB card)
+  serves the phone's preview, aiming, battery percent and start/stop.
+- **Time.** The module's RTC keeps time. Add a GNSS receiver only if
+  footage must line up with other recordings. In the two-board
+  fallback, the boards sync to each other over a short Ethernet cable
+  inside the pod.
 
 ## The pod: what changes from design v2
 
@@ -442,7 +571,11 @@ Part 3 always did. These are the rules it follows.
   - an O-ring on every seam and window;
   - an ePTFE vent and desiccant;
   - a conformal coat on the hub;
-  - a cable gland for the Cat6.
+  - two capped IP67 USB-C panel ports, CHARGE and DATA;
+  - a cable gland for the Cat6, on fixed-install pods only.
+- **The battery sits low.** The pack goes at the bottom of the pod,
+  shaded and away from the module and lid, with its thermistors bonded
+  to the cells.
 - **The lid is the heatsink.** The module faces up against the finned
   aluminium lid through a gap pad, and the lid shades everything below
   it. Size the lid before the shell.
@@ -464,10 +597,12 @@ step has a pass condition.
 
 | Step | Work | Pass condition |
 | --- | --- | --- |
-| 1. Bench worst case | Two IMX678 heads on one RK3588 ISP at 4K25 (any RK3588 board with two camera ports), locked exposure and white balance, 35 Mbps each | 90 minutes, no dropped frames, recorded bitrate within 10% of the target |
+| 1. Bench worst case | Two IMX678 heads on one RK3588 ISP at 4K25 (any RK3588 board with two camera ports), locked exposure and white balance, 35 Mbps each. Log the board's input power throughout | 90 minutes, no dropped frames, recorded bitrate within 10% of the target; watts measured, which sizes the battery |
 | 2. Field A/B | One head beside an RLC-843A at a real match; `spike/evals/ball_recall.py` on both | Fewer and shorter ball gaps than the Reolink |
 | 3. Hub and baseboard | Order two hubs and one baseboard (R122 fitted); bring up all four ports; set a master | Four synced streams for a full match; XVS on every head within 1 us |
-| 4. Pod | Re-fit `sideline_pod.scad`, print, seal, aim with the cards in `aim/` | `check_pod.py` passes; each view matches its card; lid under 60 C in sun |
+| 4. Power board | Read how the baseboard combines J6, J12 and J4; design the power board ("Power: battery first") in KiCad, with ERC and DRC clean as the hub's are; order it and a pack sized from step 1 | A full match on battery; the charger plugged and unplugged mid-recording without a dropped frame; no charging below 0 or above 45 C (checked with a freezer and a heat gun); segments closed cleanly at low battery; battery percent on the phone |
+| 5. USB-C offload and Wi-Fi | Panel USB-C from J4; copy to an inserted SSD on its own; a Wi-Fi access point in the pod for preview and start/stop | 95 GB to an SSD in under 5 minutes; preview and start/stop from a phone with no base case |
+| 6. Pod | Re-fit `sideline_pod.scad` with the battery low and the two USB-C ports, print, seal, aim with the cards in `aim/` | `check_pod.py` passes; each view matches its card; lid under 60 C and pack under its rating in sun |
 
 ## Not verified yet
 
@@ -497,6 +632,13 @@ step has a pass condition.
 - **MODULE_ID and the 5 V rail**, as above: measure before fitting the
   module.
 - **Heat** in a sealed pod in sun, and **weight**, are estimates.
+- **Battery and USB-C** are on paper:
+  - The power board is not designed.
+  - The battery life follows from estimated watts.
+  - Whether the baseboard's USB-C can act as a USB device on the RK3588
+    is unknown.
+  - How J6, J12 and J4 share power on the baseboard has not been read
+    from its schematic.
 - **The pipeline still takes one camera per match**, as `../README.md`
   says.
 

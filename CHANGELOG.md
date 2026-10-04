@@ -641,3 +641,28 @@ has been bought, built or filmed.
   the lid needs about 900-1,900 cm2 against 600. The buying list, cost
   note, PoE row and "Not verified yet" bullet match. All of it is on
   paper; no hardware exists yet.
+- **Battery first, PoE for a fixed install.** The pod should match a Veo
+  for ease so parents can use it, so the README's new "Power" section
+  makes the battery the main supply and PoE the option for a pod left at
+  one ground. Antmicro's docs show the baseboard already takes a battery
+  on J12 (9-20 V; 4S Li-ion 12-16.8 V and 4S LiFePO4 10-14.6 V fit) and
+  has J4 USB-C with 10 Gbps data and a USB PD sink (TPS65988), but it
+  does not charge a battery, so a small power board is needed. At
+  12-18 W a match costs 26-40 Wh, so 99 Wh (the carry-on limit) gives
+  2-3 matches; the mast load rises from 0.9 to about 1.5-1.8 kg. Heat is
+  the main risk: Li-ion charges at 0-45 C and the lid target is under
+  60 C.
+- **The power board's requirements** are written down: USB-C PD charging
+  up to 100 W; a 1-4S buck-boost charger with power path, so plugging in
+  never drops recording; NTC/JEITA limits plus a module-side sensor; a
+  fuel gauge; a clean-shutdown GPIO; a button and LEDs; no back-feed in
+  PoE installs; cell protection left to the pack's BMS.
+- **Footage and control without a base station.** The pod copies to a
+  USB-C SSD on its own (2-4 min per 95 GB match; USB device mode on the
+  RK3588 is unverified), and a Wi-Fi AP in the pod replaces the base case
+  for preview and start/stop. The diagram, sealing rules, data/weight
+  table, buying list (battery parts; base station marked PoE-only) and
+  "Not verified yet" match. The build order gains step 4, design and
+  build the power/temperature board, and step 5, USB-C offload and
+  Wi-Fi; step 1 now also logs input watts to size the battery. All of it
+  is on paper; no battery has been bought or measured.
