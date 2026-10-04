@@ -1,0 +1,18 @@
+The camera hub's 50-pin connector footprint and 3D model come from
+Antmicro's OV5640 dual camera board, licensed under the Apache License,
+Version 2.0 (LICENSE-Apache-2.0.txt):
+
+  https://github.com/antmicro/ov5640-dual-camera-board
+  commit 055001427fade37ac5752579b36f8737d5baf7dd
+  Copyright (c) 2017-2024 Antmicro
+
+  sideline.pretty/WE_68715014522.kicad_mod
+      from lib/OV5640-dual-camera-board-footprints/WE_68715014522.kicad_mod;
+      changed: the 3D model path now points at sideline.3dshapes/, and
+      the four unnumbered mounting pads are numbered MP so they take the
+      symbol's ground pin.
+  sideline.3dshapes/WE_68715014522.stp
+      from lib/3d-models/WE_68715014522.stp, unchanged.
+
+The rest of this directory is part of the Sports Camera Analytics
+repository.

@@ -450,3 +450,219 @@ clicking a few keyframes per match and tracking the fixed background
 - **`docs/SPEC.md` is untouched.** It is a copy of the living design doc,
   which the user updates separately; this branch only reorders the work
   in `NEXT.md` ahead of it.
+
+## 0.1.11 — a buying list, a printed head and the coverage arithmetic
+
+Turns the camera-first decision into hardware: a fixed sideline rig for
+daytime youth games (U10-U17), on a mast, the static camera the spec's
+Mode A is built for (M9, pulled forward by `docs/NEXT.md`). Everything
+here is sized by arithmetic, not a measurement, and the field test it is
+built for is still ahead.
+
+- **The halfway line, not behind a goal.** It is the one spot that
+  minimises the farthest distance to any point on the pitch: 86-90 m on
+  11v11, against 110 m behind a goal and 126 m from a corner.
+- **An uneven lens split beats an even one.** The far corners are two to
+  three times farther than the near side, so two 6 mm cameras cover the
+  far half and two 4 mm cameras the near half. That keeps the ball at
+  8.6 px or more anywhere on 11v11 (9.8 px at the far corner, inside the
+  8-17 px range that `spike/evals/training_2026-09-23.md` found), where
+  an even split would give about 5-6 px. Players stay at 62 px or more,
+  and worst-case ground resolution is 0.25 m per pixel, from an 8 m mast
+  10 m back.
+- **Aim.** Far cameras 25.5 degrees either side of straight across and
+  4 degrees down; near cameras 40 degrees either side and 26 degrees
+  down. Nothing inside the lines drops out with up to 2 degrees of
+  aiming error, on masts from 6 m to 8 m.
+- **`hardware/README.md`** is the buying list, with sources: two
+  Milesight MS-C8164-PD (450 g, 4K30, 16 Mbps, manual shutter, IP67/IK10,
+  NDAA-compliant) per focal length keep the head near 2.9 kg, under the
+  4.5 kg rating of the 8 m carbon mast it ships on; a Ubiquiti USW-Flex
+  on the head means one PoE++ cable up the mast instead of four. It also
+  has the mechanical and electrical connections, print and assembly
+  steps, camera settings, the field routine, and what is not verified.
+- **`hardware/head/sideline_head.scad`** is the parametric OpenSCAD
+  head: four angled pads, a captive 3/8"-16 nut, a clamp collar, a
+  switch hood, a guy ring, and two small test prints for the parts that
+  need measuring against real hardware first. Binary STLs and preview
+  renders are checked in alongside it.
+- **`hardware/rig_geometry.py`** is the coverage and resolution
+  arithmetic itself: it draws a per-camera aim card and a coverage map
+  from the pipeline's own pitch model, so a card can be checked against
+  a camera's live view at setup. Cards for 11v11, 9v9 and 7v7 are in
+  `hardware/aim/`.
+- **`hardware/recorder/`** stream-copies the four cameras into
+  ten-minute clock-aligned segments, with a chrony config so all four
+  cameras and the recorder share one clock at the field.
+- **Nothing under `sideline/` changes.** Two gaps are recorded rather
+  than fixed: the pipeline takes one camera per match, and multi-camera
+  input is a SPEC non-goal, so four views need a stitch at ingest or
+  per-view registration merged on the pitch, which is a spec decision;
+  and `StaticRegistrar.register()` ignores the frame, so a bumped or
+  swaying mast would silently shift every coordinate after it.
+
+## 0.1.12 — a hidden pod, and what cheaper cameras give up
+
+Answers whether cheaper Reolink cameras would do, and hides them: a second
+build beside the open head, four RLC-833A zoom turrets behind flush ports
+in one printed pod, so the rig reads as one sports camera rather than four
+security cameras on a stick. What decides it is pixels per degree, not
+megapixels, and it favours the zoom turret; what it gives up is bitrate,
+frame rate, an unpublished shutter limit and an unproven zoom motor, so
+the pod is a second build to test, not a replacement yet.
+
+- **Pixels per degree, not megapixels.** From the same mast and lens
+  model, the smallest ball on 11v11 is 6.3 px on four fixed RLC-810A (87
+  degrees), 7.1 px on four 12 MP P340 (93 degrees), 8.6 px on the open
+  head's Milesights, and 9.3 px on four RLC-833A zoom turrets (far pair
+  zoomed to 54 degrees, near pair at 84) — at about a quarter of the
+  camera cost, $310-420 against about $1,580. The price: half the bitrate
+  (8 vs 16 Mbps), 25 fps, an unpublished fastest shutter, and a motorised
+  zoom that must come back after every power-up. Record one match on one
+  RLC-833A (`docs/NEXT.md`'s fixed-camera test, ball recall over bursts)
+  before buying four.
+- **`hardware/pod/sideline_pod.scad`** is the convex hull of a window disc
+  per camera, the camera bases, a roof, a back and a floor ring. Each
+  window is a face of that hull, so nothing of the housing stands in front
+  of its plane: it cannot enter a view, and each camera can be trimmed 5
+  degrees either way.
+- **The shell is a rain screen, not a seal** (the cameras are IP66). It
+  prints as a cap and four quarters, so the roof has no seam; every seam
+  is a butt joint with a tongue behind it, and on level seams the tongue
+  rises from the piece below, so water that creeps in runs back out. A
+  printed frame (core, seat rings on struts, floor ring, top plate)
+  carries the load, with each seat whole to one frame half so no seat is
+  cut between prints. Print orientations keep every support inside the
+  shell; the lower quarters print upside down, standing on their own
+  tongue, because floor-down would scar the underside — the face the
+  touchline looks at.
+- **`hardware/pod/check_pod.py`** fixes two problems the first export had,
+  floating lap strips and a top plate poking 3 mm through the back wall,
+  and now checks, from the `.scad`'s own parameters: windows flush; no
+  shell or frame in any view with 5 degrees of trim; clearances between
+  turrets, shell, frame and the frame halves; and every piece one
+  watertight body that fits a 250 mm bed. All pass: turret to turret 7.3
+  mm, turret to shell 4.3 mm, frame to shell 4.5 mm.
+- **Aim.** The first aims (near pair ±40/28, far zoom 53) left gaps inside
+  the lines in 5 of 300 trials with every camera 2 degrees off; the
+  shipped aims (near ±39/27, far zoom 54, far ±26/4) leave none in 600.
+  `hardware/rig_geometry.py` gains `--head reolink-833a` (a `HEADS`
+  table), so the pod's numbers and its aim cards (`hardware/pod/aim/`)
+  come from the same model as the open head's.
+- **`hardware/recorder/record.sh`** now copies video only (`-map 0:v`): S0
+  already drops audio (`-an` in `sideline/stages/s0_ingest.py`), the
+  Reolinks have microphones, and a sideline microphone records the parents
+  standing under it. It also documents the Reolink RTSP path
+  (`PATH_MAIN=h265Preview_01_main`).
+
+## 0.1.13 — a camera hub board, designed and checked, not yet built
+
+A third way to build the rig, next to the open head and the hidden pod:
+one PCB that turns Antmicro's open-hardware Jetson Orin Baseboard into a
+four-camera recorder built from chosen parts, not repurposed security
+cameras. The IP domes cap each stream at 8 Mbps, do not publish a
+fastest shutter, depend on a motorised zoom returning after every
+power-up, and weigh about 2.4 kg on a mast rated for 4.5 kg; heads of
+our own trade that for a chosen bitrate, a 1/1000 s shutter, locked
+white balance, frame-synced sensors and a tilt sample per frame, at an
+estimated 0.9 kg. The schematic and board pass KiCad's own checks
+clean, and the coverage arithmetic that aimed the hidden pod finds no
+gap here either, in 300 trials with every camera 2 degrees off. Nothing
+has been bought, built or filmed.
+
+- **`hardware/pod-board/README.md`** lays out the system: Antmicro's
+  baseboard used as built except one resistor-array change (fit R122,
+  remove R108), carrying a Mixtile Core 3588E (RK3588) that records
+  four 4K H.265 streams to NVMe inside the pod. Four Sony IMX678 heads
+  run on Raspberry Pi 22-pin FFCs, through Commonlands CIL083 lenses
+  (far pair, 51 degrees, aimed ±24 degrees at 4 down) and CIL042 lenses
+  (near pair, 85 degrees, aimed ±40 degrees at 29 down), on one PoE++
+  (802.3bt) cable down the mast. First-unit cost is an estimate,
+  $1,300-2,200; the README also covers the buying list, wiring,
+  baseboard setup, cables, the recording and sync pipeline, power,
+  heat and weight, the pod changes it needs, and a build order with
+  pass conditions and what is not yet verified.
+- **`hardware/pod-board/hub/`** is the one new PCB, "Sideline camera
+  hub" rev A: KiCad 9, 84 x 52 mm, four layers, every part on one side.
+  It turns the baseboard's two 50-pin camera connectors into four
+  Pi-style 22-pin ports, with a load switch per head, an XVS/XHS
+  frame-sync bus through SN74AVC4T774 translators (one head as master,
+  or an external pulse on J3), an ICM-42688-P IMU with FSYNC tied to
+  the frame pulse, an SHT45, PCA9555 expanders and test points. The
+  schematic passes ERC clean (0 errors, 0 warnings) and the board
+  passes DRC with schematic-parity checked (0 violations, 0
+  unconnected pads, 0 footprint errors). `fab/` carries the Gerbers,
+  drill file, BOM, CPL, schematic and bottom-assembly PDFs and the
+  ERC/DRC reports; `renders/` the rendered views. The 50-pin footprint
+  and its 3D model are Antmicro's, from its OV5640 board, under
+  Apache-2.0 (`NOTICE`, `LICENSE-Apache-2.0.txt`); only the model path
+  and the mounting-pad numbering (MP) were changed. `gen/` is the
+  generator that built it all — netlist, schematic, placement,
+  hand-drawn MIPI pairs, ground via fan-out, routing, then finish and
+  fab, run end to end by `build.sh` — and a from-scratch rebuild was
+  checked to pass the same ERC and DRC.
+- **Freerouting 2.1.0 does not work here.** It left 79 connections
+  unrouted where 1.9.0 left 3, and run headless it ignores `-mp` and
+  does not stop. 1.9.0, run in GUI mode under `xvfb-run`, routes the
+  board fully; its optimiser was switched off after it ran past ten
+  minutes.
+- **In1 stays a solid ground plane under the MIPI pairs** for their
+  whole run; In2 is kept solid under the pairs' short stretch on
+  B.Cu, and carries some slow signals elsewhere, under a ground pour.
+- **`hardware/rig_geometry.py`** gains a rectilinear lens model for the
+  low-distortion M12 lenses (under 1% TV, so f-theta would misstate
+  them), a `homebrew-678` head, and `--trials N`, which repeats the
+  coverage check N times with every camera's yaw and tilt off by up to
+  2 degrees and counts the trials that still leave a gap inside the
+  lines. The home-brew head puts the smallest ball on 11v11 at 8.0 px,
+  10.1 px at the far corner, with 0 of 300 trials leaving a gap.
+- **`hardware/pod-board/aim/`** carries aim cards and coverage maps for
+  11v11, 9v9 and 7v7, made the same way as the open head's and the
+  hidden pod's.
+- **`hardware/README.md`** points to the pod board as this third way
+  to build the rig.
+- **`hardware/pod-board/README.md` named a fallback that cannot do the
+  job.** It offered a single Jetson Orin NX 16GB as the drop-in if the
+  RK3588 fails the bench test. The Orin NX H.265 encoder is rated 1x
+  4K60 or 3x 4K30, about 800 MP/s; four IMX678 heads at 3840x2160 and
+  25 fps need about 830 MP/s. The fallback is now more compute, not a
+  different single module: a second Antmicro baseboard plus module, two
+  heads per module, which is how the hub already splits (J1 serves
+  FAR-L/NEAR-L, J2 serves FAR-R/NEAR-R; board A's J7 goes to hub J1,
+  board B's to J2). A second RK3588 is tried first, because one head per
+  ISP removes the shared-ISP risk the bench test checks; two Orin NX are
+  second, at 52% of the encoder each.
+- **The new section "If one module is not enough"** records what the
+  split costs. `+3V3A` comes from board A and powers the expanders,
+  translators, IMU and 1.8 V regulator, so board A must be up first;
+  only board A gets the frame pulse, so board B pairs frames by chrony
+  timestamps; there are two Cat6/PoE runs. Cost grows by about
+  $800-1,100 for a second RK3588 and $2,300-2,600 for two Orin NX, and
+  the lid needs about 900-1,900 cm2 against 600. The buying list, cost
+  note, PoE row and "Not verified yet" bullet match. All of it is on
+  paper; no hardware exists yet.
+- **Battery first, PoE for a fixed install.** The pod should match a Veo
+  for ease so parents can use it, so the README's new "Power" section
+  makes the battery the main supply and PoE the option for a pod left at
+  one ground. Antmicro's docs show the baseboard already takes a battery
+  on J12 (9-20 V; 4S Li-ion 12-16.8 V and 4S LiFePO4 10-14.6 V fit) and
+  has J4 USB-C with 10 Gbps data and a USB PD sink (TPS65988), but it
+  does not charge a battery, so a small power board is needed. At
+  12-18 W a match costs 26-40 Wh, so 99 Wh (the carry-on limit) gives
+  2-3 matches; the mast load rises from 0.9 to about 1.5-1.8 kg. Heat is
+  the main risk: Li-ion charges at 0-45 C and the lid target is under
+  60 C.
+- **The power board's requirements** are written down: USB-C PD charging
+  up to 100 W; a 1-4S buck-boost charger with power path, so plugging in
+  never drops recording; NTC/JEITA limits plus a module-side sensor; a
+  fuel gauge; a clean-shutdown GPIO; a button and LEDs; no back-feed in
+  PoE installs; cell protection left to the pack's BMS.
+- **Footage and control without a base station.** The pod copies to a
+  USB-C SSD on its own (2-4 min per 95 GB match; USB device mode on the
+  RK3588 is unverified), and a Wi-Fi AP in the pod replaces the base case
+  for preview and start/stop. The diagram, sealing rules, data/weight
+  table, buying list (battery parts; base station marked PoE-only) and
+  "Not verified yet" match. The build order gains step 4, design and
+  build the power/temperature board, and step 5, USB-C offload and
+  Wi-Fi; step 1 now also logs input watts to size the battery. All of it
+  is on paper; no battery has been bought or measured.
