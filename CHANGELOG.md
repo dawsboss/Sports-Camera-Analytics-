@@ -621,3 +621,23 @@ has been bought, built or filmed.
   hidden pod's.
 - **`hardware/README.md`** points to the pod board as this third way
   to build the rig.
+- **`hardware/pod-board/README.md` named a fallback that cannot do the
+  job.** It offered a single Jetson Orin NX 16GB as the drop-in if the
+  RK3588 fails the bench test. The Orin NX H.265 encoder is rated 1x
+  4K60 or 3x 4K30, about 800 MP/s; four IMX678 heads at 3840x2160 and
+  25 fps need about 830 MP/s. The fallback is now more compute, not a
+  different single module: a second Antmicro baseboard plus module, two
+  heads per module, which is how the hub already splits (J1 serves
+  FAR-L/NEAR-L, J2 serves FAR-R/NEAR-R; board A's J7 goes to hub J1,
+  board B's to J2). A second RK3588 is tried first, because one head per
+  ISP removes the shared-ISP risk the bench test checks; two Orin NX are
+  second, at 52% of the encoder each.
+- **The new section "If one module is not enough"** records what the
+  split costs. `+3V3A` comes from board A and powers the expanders,
+  translators, IMU and 1.8 V regulator, so board A must be up first;
+  only board A gets the frame pulse, so board B pairs frames by chrony
+  timestamps; there are two Cat6/PoE runs. Cost grows by about
+  $800-1,100 for a second RK3588 and $2,300-2,600 for two Orin NX, and
+  the lid needs about 900-1,900 cm2 against 600. The buying list, cost
+  note, PoE row and "Not verified yet" bullet match. All of it is on
+  paper; no hardware exists yet.

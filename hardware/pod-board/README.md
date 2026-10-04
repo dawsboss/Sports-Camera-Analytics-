@@ -98,7 +98,7 @@ the rest are estimates marked "about". Check before ordering.
 | 1 | [Antmicro Jetson Orin Baseboard](https://order.openhardware.antmicro.com/), rev 1.3.4 | $499, out of stock at CircuitHub | Or build it from the open files; see "Baseboard setup" for the one change |
 | 1 | [Mixtile Core 3588E](https://www.mixtile.com/store/som/core-3588e/), RK3588, 16 GB / 128 GB | between $132 (4 GB / 32 GB) and $338 (32 GB / 256 GB) | Jetson SO-DIMM module on 5 V; the 4 GB version should record, 16 GB leaves room |
 | 1 | NVMe SSD, M.2 key M, 1 TB | about $80-150 | Recording; the baseboard's M.2 slot |
-| 1 | Jetson Orin NX 16GB (fallback only) | $999 list | Drop-in if the RK3588 fails the bench test |
+| 1 each | A second baseboard, module and SSD (fallback only) | see "If one module is not enough" | Only if the bench test fails; the hub splits between two boards as built |
 
 ### Camera heads
 
@@ -149,7 +149,9 @@ the offload.
 | Pod: lid, windows, seals, gland, printing | $100 | $200 |
 | **Total** | **about $1,300** | **about $2,200** |
 
-The Orin NX fallback adds $999 if the RK3588 fails the bench test.
+The fallback, a second baseboard with its own module, adds about
+$800-1,100 with a second RK3588, or about $2,300-2,600 with two Orin NX
+modules in place of the RK3588s (see "If one module is not enough").
 
 ## How it connects
 
@@ -282,6 +284,73 @@ Four 2-lane cameras need one change and one check on the baseboard.
 - **I2C pull-ups** go to 3.3 V as shipped (R166, R174 fitted), which is
   what Raspberry Pi style heads expect.
 
+## If one module is not enough: add a second
+
+The fallback is more compute, not a different single module. No module
+that fits this socket records four 4K25 streams with margin, so if the
+bench test fails, the pod gets a second baseboard and module, and each
+records two cameras.
+
+**Why not a single Orin NX.** It was the fallback here until 4 October
+2026, and it does not fit the load. Its H.265 encoder is rated at
+1x 4K60 or 3x 4K30, about 800 megapixels a second, and four heads at
+3840 x 2160 and 25 fps need about 830. The Orin Nano has no hardware
+encoder at all.
+
+| One module, four heads at 4K25 (about 830 MP/s) | Encoder | Image processors |
+| --- | --- | --- |
+| RK3588 (H.265 8K30, about 995 MP/s) | 83% | Two heads on each of its two ISPs, the documented limit; this is what the bench test checks |
+| Orin NX 16GB (about 800 MP/s) | 104%, does not fit | n/a |
+
+| Two modules, two heads each (about 415 MP/s each) | Encoder | Image processors |
+| --- | --- | --- |
+| Two RK3588 | 42% each | One head per ISP: the shared-ISP limit no longer applies |
+| Two Orin NX 16GB | 52% each | NVIDIA's own ISP; an IMX678 driver for Jetson must be found or ported |
+
+**Which second module.** Try a second RK3588 first. The bench test's
+real risk is two 4K heads sharing one ISP, and two boards remove the
+sharing, while the software stays one platform. Move to two Orin NX
+only if the RK3588 fails for another reason: drivers, the ISP tuning,
+or the encoder's rate control.
+
+**The hub splits as built.** J1 serves FAR-L and NEAR-L, and J2 serves
+FAR-R and NEAR-R, so no new board is needed:
+
+- **Cables.** Board A's J7 goes to hub J1, as now. Board B's J7 goes to
+  hub J2, in place of board A's J8. Order both baseboards with the same
+  resistor change ("Baseboard setup") so they are identical.
+- **Power.** Each board powers its own 3.3 V rail: board A powers
+  +3V3A and board B powers +3V3B. But the expanders, translators, IMU
+  and 1.8 V regulator all run on +3V3A. So board A must be up before
+  board B's heads can be switched on, and board B's heads lose their
+  sync and power control if board A goes down.
+- **Control.** U1 answers on board A's mux channel 0, and U2 on board
+  B's mux channel 0, each at 0x20. Each board clears its own
+  expander's OE in sync bring-up step 3.
+- **Sync.** All four heads stay on one XVS/XHS bus, with FAR-L the
+  master. Only board A receives the frame pulse (J1 pin 32). Board B's
+  pin 32 carries the expanders' interrupt instead, to its CAM0_PWDN
+  GPIO, which is fitted as shipped. Board B pairs its frames with board
+  A's by timestamp: both run chrony against the mini PC, which is
+  sub-millisecond against a 40 ms frame.
+- **Network.** Each baseboard has one RJ45 and one 802.3bt PD, so the
+  simplest build is two Cat6 runs down the mast and two injectors at
+  the base. An in-pod PoE switch would save a cable, at the cost of
+  weight and heat.
+
+**What it costs.**
+
+| | Second RK3588 board | Two Orin NX boards |
+| --- | --- | --- |
+| Parts added to the first unit | baseboard $499, module $132-338, SSD $80-150, injector $50, Cat6 and gland $20-40 | the same baseboard, SSD, injector and cable, plus two Orin NX at $999 each in place of the RK3588 |
+| Added cost (estimate) | about $800-1,100 | about $2,300-2,600 |
+| Power in the pod (estimate) | about 22-30 W | about 35-45 W (both modules in a 15 W mode) |
+| Finned lid for a 20 C rise (same rule as below) | about 900-1,250 cm2 | about 1,450-1,900 cm2 |
+| Weight added (estimate) | about 0.2-0.3 kg (board, module, SSD, a larger lid) | about 0.3-0.4 kg |
+
+The lid is the hard part: the pod in "The pod" is sized for one 15 W
+module. Re-size it before printing if the fallback is taken.
+
 ## Cables
 
 - **50-pin.** Baseboard J7 pin N must reach hub J1 pin N, and J8 must
@@ -357,7 +426,7 @@ Estimates, all of them, until the bench test measures them.
 | | Figure | Basis |
 | --- | --- | --- |
 | Power in the pod | about 12-18 W | RK3588 encoding four streams 6-10 W, four sensors about 2 W, NVMe 2-3 W writing, conversion losses |
-| PoE budget | 51 W at the PD | 802.3bt Type 3 (TPS2372-3); an Orin NX fallback at 25 W still fits |
+| PoE budget | 51 W at the PD | 802.3bt Type 3 (TPS2372-3); with the two-board fallback, each board has its own PD and its own 51 W |
 | Data | 140 Mbps at 35 Mbps a head | 63 GB an hour; 95 GB for 90 minutes; a 1 TB SSD holds about ten matches |
 | Offload | about 16 minutes a match | 95 GB over gigabit Ethernet to the mini PC |
 | Heat | about 600 cm2 of finned lid for a 20 C rise | 15 W, still air plus radiation at about 12 W per m2 per C; sun on a white lid adds a few watts |
@@ -416,7 +485,9 @@ step has a pass condition.
   been checked.
 - **Four 4K cameras on one RK3588.** Two cameras sharing an ISP are
   capped at 3840 x 2160 each and need rkisp_3A_server. That is exactly
-  this load, and it is the bench test.
+  this load, and it is the bench test. If it fails, the fallback is a
+  second board ("If one module is not enough"), which is designed on
+  paper only.
 - **The heads.** Soho Enterprise's IMX678 boards are samples, stock is
   short, and whether XHS comes out is unconfirmed. Khadas runs IMX678 at
   4K on RK3588S, so a driver exists to port. An IQ tuning file for these
