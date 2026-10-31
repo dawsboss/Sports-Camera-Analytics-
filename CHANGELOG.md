@@ -666,3 +666,97 @@ has been bought, built or filmed.
   build the power/temperature board, and step 5, USB-C offload and
   Wi-Fi; step 1 now also logs input watts to size the battery. All of it
   is on paper; no battery has been bought or measured.
+
+## 0.1.14 — restarts read off the ball, not the pitch, and who took them
+
+Per-frame registration of the Veo follow-cam failed the M1 gate on both
+real exports (1 and 0 of 60 frames), and the coach's question is
+narrower than registration: which restart happened, who took it, and
+when. `docs/NEXT.md` ("Restarts, and counting them") had said the restart
+type needed *where* on the pitch it happened. That is true for one pair
+only. Every restart has a physical signature the camera sees without
+pitch coordinates: a throw-in is the one restart taken with the ball in
+the hands above the head; a keeper with the ball in hand is a claim; a
+keeper striking a grounded ball is a goal kick; the first dead ball of a
+period is the kick-off; a lone taker with every other player beyond the
+ball is a corner; a grounded ball among players is a free kick. The pair
+that does need the pitch is corner against goal kick when the detector
+cannot tell a keeper from a player (a COCO model cannot), and that case
+is reported as `restart` with the reason rather than guessed, until team
+assignment (S4) labels the keeper by kit. All of this is built and
+tested on a CPU with no model and no footage, on scripted scenes of each
+restart. None of it has met real footage.
+
+- **`s2_detection`** puts an Ultralytics checkpoint behind a `Detector`
+  protocol (COCO by default, the fine-tuned ball model when it earns it,
+  a scripted detector in tests) and labels it with the sport plugin's
+  entity class names. People whose feet are off the surface are dropped
+  when the sport declares its surface is grass
+  (`SoccerPlugin.surface_is_grass`), because every Veo frame has coaches
+  and spectators along the touchline; a court sport keeps everyone.
+  Writes `detections.parquet`.
+- **`s3_tracking`** is ByteTrack's two-pass idea with no dependency
+  beyond numpy. People are matched by overlap after a constant-velocity
+  nudge, or by centre distance in their own heights when a runner moves
+  her own height between 5 fps samples and overlaps nothing. The ball is
+  matched by where it went and may vanish for 15 samples, the measured
+  blackout tail. Writes `fragments.parquet` in image pixels.
+- **`s8_events`** (the events half of S8) finds every moment the ball sat
+  still and was put back into play, after subtracting the camera's
+  motion, and measures who was nearest, whether the ball sat high in
+  their box, how alone they were and how far beyond everyone else the
+  ball lay, all in heights of the person nearest the ball, so the far end
+  of a static view is scaled by the far player, not the frame. The sport
+  plugin names it (`SoccerPlugin.classify_restart`: a `DeadBall` in, a
+  `RestartCall` out); no code outside `sports/` knows the word throw-in.
+  Writes `events.parquet` (taker as a `track_id`, pitch coordinates
+  null), `dead_balls.json` with every cue, and `events.csv`, the list the
+  coach asked for: match clock, event, who, how sure, why.
+  `sideline log <match>` prints it.
+- **Camera motion comes from registration when it exists.** Where
+  consecutive frames were placed, the homographies give the motion (zero
+  on a fixed camera); only where they were not is it estimated as the
+  median shift of the people in frame. The people estimate is right for
+  a pan and wrong for the second in which most players jog the same way,
+  which the invariant check found. The stage never asks which camera it
+  is, only whether S5 placed the frame. Tested: a fixed-camera scene
+  where the players drift together and the ball sits for a goal kick is
+  missed with the people estimate and found with a static registration.
+- **Period starts come through `timeline.py`** from the kickoff offset
+  and the minutes app's periods, now carried on `MatchRecord`. S0's
+  half-time hint stands in only when the periods are absent, and the
+  manifest says which was used. Each sport states its own dead-ball
+  constants in its `EventGrammar`; `sports/base.py` carries no defaults
+  to inherit.
+- **`timeline.py` reads the minutes app's taps.** `taps_from_sm` reads
+  the `matches/{id}/events` node ({t, at, side, kind, pid}, with goals,
+  shots and turnovers in sibling nodes) and `video_ms_for_elapsed` is the
+  inverse of `match_seconds`.
+- **`spike/evals/restarts_on_taps.py`** scores detected restarts against
+  those taps per kind, allowing for the coach's reaction lag (a tap
+  trails its event; a foul's window reaches 30 s behind for the free
+  kick that follows). It separates "dead ball found but misnamed" from
+  "missed", because they are different failures.
+- **Contracts.** `EVENTS_SCHEMA` gains a nullable `track_id` after the
+  spec's seven columns: a restart is attributed to a box in the video
+  before anyone names it, and the name is a review decision on that
+  track, never an edit to the file. `FRAGMENTS_SCHEMA` is new, for S3;
+  `EntityClass.object` marks the ball. `ORDER` lists all five stages;
+  `DEFAULT_STAGES` (ingest and sampling) is what an upload runs unless
+  asked. `sideline ingest` takes `--weights`, `--imgsz`,
+  `--no-grass-filter` and `--max-frames`.
+- **Who took it is a track today.** The name comes from S6 linking
+  fragments to the roster through kit and stints plus one review click,
+  and from the minutes app itself, whose attributed taps ("throw-in,
+  number 7, 23:14") name the taker's track for free and are a labelled
+  identity set S6 should read before asking a human.
+- **Not measured.** Every constant in soccer's `EventGrammar` and every
+  confidence in `classify_restart` is a prior until `restarts_on_taps.py`
+  has run on both Veo exports against their taps. The dead-ball test
+  needs about five consecutive ball samples: the measured median gap of
+  1-2 is fine, but the 8-15 sample tail will lose some restarts
+  outright. `pytest` passes (113 tests, about 40 s, CPU only), and
+  nothing in `tests/test_followcam_synthetic.py` changed. `docs/SPEC.md`
+  is unchanged on purpose, since it is a copy of the living doc; the
+  `track_id` column and the restart types are the change to carry back
+  to it.

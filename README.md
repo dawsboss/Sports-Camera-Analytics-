@@ -53,17 +53,38 @@ curl -F file=@match.mp4 -F capture_mode=followcam -F pitch_length=100 -F pitch_w
 The API docs are at `localhost:8000/docs`, MinIO's console at `:9001`. The
 upload takes the accompanying inputs the spec lists (`sm_match_id`, roster,
 stints and periods as JSON, kickoff offset, pitch dimensions), stores the
-file under `matches/{id}/source/`, and queues S0 then S1. Every stage writes
-`matches/{id}/{stage}/v{n}/` with a `manifest.json` recording its config and
-inputs; a re-run is a new version.
+file under `matches/{id}/source/`, and queues S0 then S1 unless `stages`
+names more. Every stage writes `matches/{id}/{stage}/v{n}/` with a
+`manifest.json` recording its config and inputs; a re-run is a new version.
+
+Players, the ball and restarts, on a machine with a GPU and the `eval`
+extra installed, with no services:
+
+```
+sideline ingest match.mp4 --kickoff-offset-ms 83000 \
+    --stages s0_ingest,s1_sampling,s2_detection,s3_tracking,s8_events
+python spike/evals/restarts_on_taps.py --match-dir data/blobs/matches/<id> --sm matches-node.json
+```
+
+The first writes `detections.parquet`, `fragments.parquet` and
+`events.parquet` (throw-ins, corners, goal kicks, free kicks, kick-offs,
+keeper claims, each with the taker's track), plus `events.csv`, the same
+rows as a coach would write them down: match clock, event, who, how sure.
+`sideline log <id>` prints that list. The eval script scores the events
+against the corners, throw-ins and goal kicks the coach tapped in the
+minutes app. `docs/NEXT.md`, "Restarts without registration", says why
+this needs no pitch coordinates and what it still needs.
 
 ## Layout
 
 ```
 sideline/
   contracts.py        tracks/events/registration Parquet schemas, match.json, player_stats.json
-  timeline.py         video time -> match seconds, via soccer-manager's periods and stints
-  sports/             the plugin boundary; soccer.py is the pitch model, entities, stat definitions
+  timeline.py         video time <-> match seconds, and the minutes app's taps, via soccer-manager's nodes
+  sports/             the plugin boundary; soccer.py is the pitch model, entities, stat definitions, restart rules
+  detection.py        S2's detector behind a protocol: an Ultralytics checkpoint, or a script for tests
+  tracking.py         S3's tracker: people by overlap or centre, the ball by where it went, no dependencies
+  events.py           dead balls from fragments: still, then struck or thrown, and who took it, in player heights
   registration/       S5: one interface, two implementations
     followcam.py        per-frame fit from painted lines (the PoC)
     static.py           clicked landmarks once per placement, homography or spline (the product)
@@ -71,7 +92,7 @@ sideline/
     synthetic.py        frames rendered through a known camera, for tests and the selftest
   storage/            blob store (local or MinIO) and the versioned artifact layout
   db/                 matches, jobs, stage runs, review decisions
-  stages/             s0_ingest, s1_sampling
+  stages/             s0_ingest, s1_sampling, s2_detection, s3_tracking, s8_events
   api/                FastAPI
   worker/             RQ worker
   spike.py, cli.py    the M1 spike and the `sideline` command

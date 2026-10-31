@@ -58,7 +58,12 @@ TRACKS_SCHEMA = pa.schema(
     ]
 )
 
-# Ball-anchored occurrences, one row each.
+# Ball-anchored occurrences, one row each. The spec's seven columns come
+# first. `track_id` is the fragment of the player the event is attributed to:
+# a restart is taken by a box in the video long before identity resolution
+# names it, and the name arrives as a review decision on that track, never
+# as an edit to this file. Pitch coordinates stay null on frames registration
+# could not place; the event is still real.
 EVENTS_SCHEMA = pa.schema(
     [
         pa.field("t_ms", pa.int64(), nullable=False),
@@ -68,6 +73,7 @@ EVENTS_SCHEMA = pa.schema(
         pa.field("player_id", pa.string(), nullable=True),
         pa.field("team", pa.dictionary(pa.int8(), pa.string()), nullable=True),
         pa.field("confidence", pa.float32(), nullable=False),
+        pa.field("track_id", pa.int32(), nullable=True),
     ]
 )
 
@@ -103,6 +109,24 @@ DETECTIONS_SCHEMA = pa.schema(
     [
         pa.field("frame_index", pa.int32(), nullable=False),
         pa.field("t_ms", pa.int64(), nullable=False),
+        pa.field("cls", pa.dictionary(pa.int8(), pa.string()), nullable=False),
+        pa.field("x1", pa.float32(), nullable=False),
+        pa.field("y1", pa.float32(), nullable=False),
+        pa.field("x2", pa.float32(), nullable=False),
+        pa.field("y2", pa.float32(), nullable=False),
+        pa.field("conf", pa.float32(), nullable=False),
+    ]
+)
+
+# S3's artifact: the detections above joined into short-lived fragments, one
+# row per track per sampled frame it was seen in. Still image pixels, because
+# tracking runs before and independently of registration; `tracks.parquet`
+# in pitch metres is what projecting these through S5 produces.
+FRAGMENTS_SCHEMA = pa.schema(
+    [
+        pa.field("frame_index", pa.int32(), nullable=False),
+        pa.field("t_ms", pa.int64(), nullable=False),
+        pa.field("track_id", pa.int32(), nullable=False),
         pa.field("cls", pa.dictionary(pa.int8(), pa.string()), nullable=False),
         pa.field("x1", pa.float32(), nullable=False),
         pa.field("y1", pa.float32(), nullable=False),

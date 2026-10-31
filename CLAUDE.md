@@ -23,6 +23,10 @@ frame is a problem a fixed camera does not have, so a cheap fixed-camera
 test comes before more registration or ball training; M3 starts now on
 the Veo footage; and the next follow-cam registrar is clicked keyframes
 plus tracking of the fixed background, not a fine-tuned line model.
+**Since 31 October restarts are found without registration** (NEXT.md,
+"Restarts without registration"): S2, S3 and the events half of S8 exist,
+and a restart is a ball that sat still and was struck or thrown, named by
+what surrounded it in heights of the taker, never in metres or pixels.
 
 ## Required after every change
 
@@ -59,6 +63,20 @@ plus tracking of the fixed background, not a fine-tuned line model.
   event grammar and stat definitions come from `sideline/sports/` through
   `get_sport()`. The test of the boundary is that basketball is a court
   model and a rules file, touching zero detection, tracking or review code.
+  The event stage measures a dead ball (`DeadBall`) and the plugin names it
+  (`classify_restart`); no code outside `sports/` knows the word throw-in,
+  only the docstrings that say so.
+- **Event thresholds are in heights of the people, not pixels or metres,
+  and each sport states its own** in its `EventGrammar`; `sports/base.py`
+  carries no defaults to inherit. That is what lets the same rule hold on
+  a frame registration could not place, on a zoomed corner and at the far
+  end of a static view. A rule in pixels would be a follow-cam shortcut
+  that constrains the static path.
+- **The event stage reads the camera's motion from registration when it
+  exists** and estimates it from the people only where it does not. It
+  never asks which camera; it asks whether S5 placed the frame. The
+  people estimate mistakes a coherent jog for a pan, which on a fixed
+  camera is the case S5's one-off calibration removes.
 - **Stints are the truth for who was on the pitch**, read from
   soccer-manager and bridged through `timeline.py` (`match_seconds`,
   `on_pitch`). Roster, stints and periods are copied at upload, never
@@ -146,14 +164,24 @@ plus tracking of the fixed background, not a fine-tuned line model.
 - **Pitch dimensions are assumed, not known.** The search runs with
   105 x 68 and both real pitches are smaller. The upload carries them;
   nobody has measured either field.
-- No S2 onward: no detection, tracking, team assignment, identity, review,
-  stats or publish. `contracts.py` already defines what they write.
+- **S2, S3 and the events half of S8 exist but have not met real footage.**
+  Detection is an Ultralytics checkpoint behind `Detector`; tracking is a
+  dependency-free two-pass tracker; `events.py` finds dead balls and the
+  soccer plugin names them. All of it is tested on scripted scenes only.
+  The confidences in `SoccerPlugin.classify_restart` are priors until
+  `spike/evals/restarts_on_taps.py` has run on both Veo exports against
+  the minutes app's taps. Corner against goal kick cannot be told apart
+  until S4 labels the keeper; the plugin says `restart` there, not a guess.
+- No S4 team assignment, S6 identity, S7 review, S8 stats or S9 publish.
+  `contracts.py` already defines what they write. Events carry the taker
+  as a `track_id`; the name arrives as a review decision or from S6, and
+  the minutes app's attributed taps are a free labelled set for S6.
 - Where `player_stats.json` sits under the fixture in soccer-manager's
   schema is undecided; that is a schema change on the other repo and is
   high-stakes there. Do not pick a path unilaterally.
 - The compose worker image is CPU-only; the CUDA/Ultralytics image is M3.
-- `RQQueue` and `MinioBlobStore` are exercised only by the compose stack,
-  not by the tests.
+- `RQQueue`, `MinioBlobStore` and `UltralyticsDetector` are exercised only
+  on the compose stack or the GPU box, not by the tests.
 
 ## Conventions
 

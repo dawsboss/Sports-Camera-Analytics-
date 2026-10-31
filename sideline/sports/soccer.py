@@ -13,12 +13,24 @@ from typing import Optional, Sequence
 
 from sideline.contracts import CaptureMode, EVENT_TYPES
 from sideline.sports.base import (
+    DeadBall,
     EntityClass,
     EventGrammar,
     Landmark,
+    RestartCall,
     StatDefinition,
     SurfaceCircle,
     SurfaceLine,
+)
+
+# How the ball comes back into play. These are the events a coach counts and
+# the minutes app already records by hand (corners, throw-ins, goal kicks,
+# keeper claims), so they are also the labels the detector is scored against.
+# A foul is not here on purpose: it is a referee's judgement with no visible
+# signature, and the free kick that follows it is. `restart` is a dead ball
+# the rules could see but not name.
+RESTART_TYPES: tuple[str, ...] = (
+    "throw_in", "corner", "goal_kick", "free_kick", "kick_off", "keeper_claim", "restart",
 )
 
 
@@ -141,7 +153,7 @@ ENTITY_CLASSES: tuple[EntityClass, ...] = (
     EntityClass("player", expected=20, maximum=22),
     EntityClass("goalkeeper", expected=2, maximum=2),
     EntityClass("official", expected=1, maximum=4),
-    EntityClass("ball", expected=1, maximum=1),
+    EntityClass("ball", expected=1, maximum=1, object=True),
 )
 
 _BOTH = frozenset({CaptureMode.STATIC, CaptureMode.FOLLOWCAM})
@@ -173,6 +185,7 @@ STAT_DEFINITIONS: tuple[StatDefinition, ...] = (
 
 class SoccerPlugin:
     sport = "soccer"
+    surface_is_grass = True
 
     def surface(self, length: float = 105.0, width: float = 68.0, **dims: float) -> PitchModel:
         return PitchModel.from_dimensions(length, width, **dims)
@@ -184,7 +197,7 @@ class SoccerPlugin:
         L, W = surface.length / 2, surface.width / 2
         pd, pw = surface.penalty_area_depth, surface.penalty_area_width / 2
         return EventGrammar(
-            event_types=EVENT_TYPES,
+            event_types=EVENT_TYPES + RESTART_TYPES,
             touch_radius_m=1.0,
             duel_radius_m=1.5,
             possession_min_s=0.4,
@@ -193,7 +206,57 @@ class SoccerPlugin:
                 "penalty_area_left": ((-L, -pw), (-L + pd, pw)),
                 "penalty_area_right": ((L - pd, -pw), (L, pw)),
             },
+            restart_types=RESTART_TYPES,
+            # A placed ball sits for seconds; a thrower holds it for one or
+            # two. Half a height is about a metre, which is how much a
+            # keeper shuffles with the ball at her feet. A thrown or kicked
+            # ball leaves at 5 m/s or more, 2.5 heights a second. Priors,
+            # until the taps have been scored.
+            dead_ball_min_s=1.0,
+            still_radius_h=0.5,
+            release_speed_h=2.5,
+            reach_h=1.5,
+            held_rel_y=0.45,
+            held_above_h=0.3,
+            near_h=3.0,
         )
 
     def stat_definitions(self) -> Sequence[StatDefinition]:
         return STAT_DEFINITIONS
+
+    def classify_restart(self, obs: DeadBall) -> RestartCall:
+        """Name a dead ball from what was visible, with no pitch coordinates.
+
+        Each restart has a physical signature a camera sees without knowing
+        where on the pitch it stood. A throw-in is the one restart taken
+        with the ball in the hands, above the head. A keeper with the ball
+        in hand is a claim, not a restart. A keeper putting a grounded ball
+        back is a goal kick. The first dead ball of a period is the
+        kick-off. What is left is a grounded ball taken by an outfield
+        player: alone, with everyone else beyond the ball, that is a corner
+        (or a goal kick where the detector cannot tell a keeper from a
+        player, and the call says so); among other players it is a free
+        kick. The confidences are priors, to be set by measurement against
+        the minutes app's taps, not tuned here.
+        """
+        keeper = obs.taker_cls == "goalkeeper"
+        if obs.held:
+            if keeper:
+                return RestartCall("keeper_claim", 0.8, "ball in the keeper's hands")
+            sure = 0.9 if obs.still_s >= 1.0 else 0.7
+            return RestartCall("throw_in", sure, "ball held high in the taker's box before release")
+        if obs.first_in_period and obs.since_period_start_s is not None and obs.since_period_start_s <= 90.0:
+            return RestartCall("kick_off", 0.8, "first dead ball of the period")
+        if keeper:
+            return RestartCall("goal_kick", 0.7, "the keeper put a grounded ball back into play")
+        if obs.taker_track is None:
+            return RestartCall("restart", 0.3, "nobody within reach of the still ball")
+        alone = obs.nearest_h is None or obs.nearest_h >= 3.0
+        beyond = obs.extreme_h is not None and obs.extreme_h >= 2.0
+        if alone and beyond and obs.n_visible >= 3:
+            if obs.roles_known:
+                return RestartCall("corner", 0.6, "taker alone with every other player beyond the ball")
+            return RestartCall("restart", 0.5, "corner or goal kick; no keeper class to tell them apart")
+        if obs.n_near >= 2:
+            return RestartCall("free_kick", 0.6, "grounded ball with players close around it")
+        return RestartCall("free_kick", 0.4, "grounded ball taken by an outfield player")

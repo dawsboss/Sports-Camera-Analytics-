@@ -30,12 +30,49 @@ def _ingest(args: argparse.Namespace) -> int:
     from sideline.pipeline import ingest_local
 
     settings = Settings.from_env(data_dir=Path(args.data))
+    config: dict = {"grass_filter": not args.no_grass_filter}
+    if args.max_frames is not None:
+        config["max_frames"] = args.max_frames
+    if args.weights:
+        # One checkpoint per --weights, all run on every frame; a COCO model
+        # for the people and a fine-tuned one for the ball is the expected pair.
+        config["detectors"] = [{"weights": w, "imgsz": args.imgsz} for w in args.weights]
     match_id = ingest_local(
         settings, Path(args.video), capture_mode=args.mode, sm_match_id=args.sm_match_id,
         pitch=(args.pitch_length, args.pitch_width), kickoff_offset_ms=args.kickoff_offset_ms,
-        stages=args.stages.split(","),
+        stages=args.stages.split(","), config=config,
     )
     print(match_id)
+    return 0
+
+
+def _log(args: argparse.Namespace) -> int:
+    """Print the match's events as a coach would write them down."""
+    from sideline.config import Settings, build_blobs
+    from sideline.storage.artifacts import ArtifactStore
+
+    settings = Settings.from_env(data_dir=Path(args.data))
+    store = ArtifactStore(build_blobs(settings))
+    ref = store.latest(args.match_id, "s8_events")
+    if ref is None or not store.complete(ref):
+        print(f"no events for match {args.match_id}; run s8_events first", file=sys.stderr)
+        return 1
+    text = store.blobs.get(ref.key("events.csv")).decode()
+    if args.csv:
+        print(text, end="")
+        return 0
+    import csv
+    import io
+
+    rows = list(csv.DictReader(io.StringIO(text)))
+    basis = rows[0]["clock_basis"] if rows else "match"
+    print(f"{'clock' if basis == 'match' else 'video':<8}{'event':<14}{'who':<16}{'sure':>5}  why")
+    for r in rows:
+        who = r["player_id"] or (f"track {r['taker_track']}" if r["taker_track"] else "nobody near")
+        if r["team"]:
+            who += f" ({r['team']})"
+        print(f"{r['clock']:<8}{r['event']:<14}{who:<16}{r['confidence']:>5}  {r['reason']}")
+    print(f"{len(rows)} events, s8_events v{ref.version}")
     return 0
 
 
@@ -70,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--no-overlays", action="store_true")
     s.set_defaults(fn=_spike)
 
-    i = sub.add_parser("ingest", help="register a match locally and run S0/S1 without any services")
+    i = sub.add_parser("ingest", help="register a match locally and run stages without any services")
     i.add_argument("video")
     i.add_argument("--data", default="./data")
     i.add_argument("--mode", choices=("static", "followcam"), default="followcam")
@@ -78,8 +115,21 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--pitch-length", type=float, default=105.0)
     i.add_argument("--pitch-width", type=float, default=68.0)
     i.add_argument("--kickoff-offset-ms", type=int, default=None)
-    i.add_argument("--stages", default="s0_ingest,s1_sampling")
+    i.add_argument("--stages", default="s0_ingest,s1_sampling",
+                   help="comma-separated; add s2_detection,s3_tracking,s8_events for players, the ball and restarts")
+    i.add_argument("--weights", action="append", default=None,
+                   help="detector checkpoint(s) for s2_detection; default is the COCO model yolo11x.pt")
+    i.add_argument("--imgsz", type=int, default=1920, help="inference size for s2_detection")
+    i.add_argument("--no-grass-filter", action="store_true", help="keep people whose feet are off the grass")
+    i.add_argument("--max-frames", type=int, default=None,
+                   help="sample and detect only this many frames, for a quick run on a slice of the match")
     i.set_defaults(fn=_ingest)
+
+    g = sub.add_parser("log", help="print a match's events: the clock, what happened, who, how sure")
+    g.add_argument("match_id")
+    g.add_argument("--data", default="./data")
+    g.add_argument("--csv", action="store_true", help="the raw events.csv instead of a table")
+    g.set_defaults(fn=_log)
 
     v = sub.add_parser("serve", help="run the API")
     v.add_argument("--host", default="0.0.0.0")

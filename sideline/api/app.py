@@ -8,7 +8,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
@@ -18,7 +18,7 @@ from sideline.config import Settings, build_blobs, build_engine
 from sideline.db.models import Job, Match, StageRun
 from sideline.db.session import session_scope
 from sideline.pipeline import enqueue_stages
-from sideline.stages import ORDER
+from sideline.stages import DEFAULT_STAGES, ORDER
 from sideline.storage.artifacts import ArtifactRef, ArtifactStore
 
 
@@ -85,9 +85,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> MatchOut:
         if capture_mode not in ("static", "followcam"):
             raise HTTPException(422, "capture_mode must be static or followcam")
-        # No `stages` means every stage; `run=false` registers the match and
-        # queues nothing, for a re-run later or a stage started by hand.
-        wanted = [s for s in (stages or ",".join(ORDER)).split(",") if s] if run else []
+        # No `stages` means the default ones (ingest and sampling; detection
+        # is asked for by name because it wants a model and a GPU); `run=false`
+        # registers the match and queues nothing, for a re-run later or a
+        # stage started by hand.
+        wanted = [s for s in (stages or ",".join(DEFAULT_STAGES)).split(",") if s] if run else []
         unknown = [s for s in wanted if s not in ORDER]
         if unknown:
             raise HTTPException(422, f"unknown stages {unknown}; known: {ORDER}")
@@ -146,9 +148,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return {"manifest": store.read_manifest(ref), "files": store.list(ref)}
 
     @app.get("/matches/{match_id}/artifacts/{stage}/{version}/{name:path}")
-    def get_artifact_json(match_id: str, stage: str, version: int, name: str, request: Request) -> dict:
-        """JSON artifacts only (match.json, manifest.json). Video, frames and
-        Parquet are read from the blob store by the stages and the review UI."""
+    def get_artifact_json(match_id: str, stage: str, version: int, name: str, request: Request) -> Any:
+        """JSON artifacts only (match.json, manifest.json, dead_balls.json).
+        Video, frames and Parquet are read from the blob store by the stages
+        and the review UI."""
         if not name.endswith(".json"):
             raise HTTPException(415, "only JSON artifacts are served here")
         ref = ArtifactRef(match_id, stage, version)
