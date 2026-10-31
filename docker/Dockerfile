@@ -12,6 +12,8 @@ COPY web ./web
 RUN pip install --no-cache-dir ".[service]"
 
 ENV SIDELINE_DATA_DIR=/data
+# A plain install puts the package under site-packages, not beside web/.
+ENV SIDELINE_WEB_DIR=/app/web
 VOLUME ["/data"]
 
 CMD ["sideline", "serve", "--host", "0.0.0.0", "--port", "8000"]

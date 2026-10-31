@@ -1,9 +1,11 @@
 """The API surface: accept an upload with its accompanying inputs, queue the
 stages, answer what exists, and serve the review page. Raw video comes in
-here and never leaves the homelab; only published aggregates go anywhere
-else. The review routes hand sampled frames and boxes to a browser on the
-same network, which is inside that boundary: this API is for the LAN or a
-Tailscale network, never the open internet."""
+here and nothing derived from it leaves the network; only published
+aggregates go anywhere else. The review routes hand S1's sampled frames
+and S3's boxes to a browser on the same network, which is inside that
+boundary and is most of the footage at 5 fps, so this API is for the LAN or
+a Tailscale network only: never the open internet, and not behind a public
+tunnel. Video and Parquet are never served."""
 
 from __future__ import annotations
 
@@ -30,8 +32,25 @@ from sideline.stages.s8_events import clock
 from sideline.storage.artifacts import ArtifactRef, ArtifactStore
 from sideline.timeline import periods_from_sm
 
-WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 VERDICTS = ("right", "wrong_type", "wrong_taker", "not_event")
+# The page must not reach anything but this API, and a script that slipped
+# into it must not be able to send frames anywhere: images and requests are
+# same-origin by policy, not by convention. Inline script and style are the
+# page's own single file.
+REVIEW_CSP = ("default-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; "
+              "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
+
+
+def web_dir() -> Path:
+    """Where the pages live: beside the source tree in a checkout, or where
+    `SIDELINE_WEB_DIR` says, which the Docker image sets because a plain
+    install puts this module under site-packages and not beside web/."""
+    import os
+
+    env = os.environ.get("SIDELINE_WEB_DIR")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parents[2] / "web"
 
 
 class JobOut(BaseModel):
@@ -43,7 +62,9 @@ class JobOut(BaseModel):
 
 
 class DecisionIn(BaseModel):
-    """A verdict on one event, keyed by the events version and the time."""
+    """A verdict on one event, keyed by the events version and the time.
+    The tracks version is the one that events version was built on; the
+    API checks it rather than trusting it."""
 
     events_version: int
     t_ms: int
@@ -193,8 +214,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/matches/{match_id}/artifacts/{stage}/{version}/{name:path}")
     def get_artifact_json(match_id: str, stage: str, version: int, name: str, request: Request) -> Any:
         """JSON artifacts only (match.json, manifest.json, dead_balls.json).
-        Video, frames and Parquet are read from the blob store by the stages
-        and the review UI."""
+        Video and Parquet are read from the blob store by the stages and are
+        never served; S1's sampled frames have their own route, for the
+        review page on this network."""
         if not name.endswith(".json"):
             raise HTTPException(415, "only JSON artifacts are served here")
         ref = ArtifactRef(match_id, stage, version)
@@ -207,16 +229,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.get("/review")
     def review_page() -> FileResponse:
-        """The review page, served from the repository's web/ directory so
-        it reaches this API on the same origin and nothing else."""
-        page = WEB_DIR / "review.html"
+        """The review page, served with a policy that keeps it on this
+        origin: it can fetch from and show images of this API and nothing
+        else, whatever text a roster or a verdict carries."""
+        page = web_dir() / "review.html"
         if not page.is_file():
-            raise HTTPException(404, "web/review.html is not beside this install")
-        return FileResponse(page, media_type="text/html")
+            raise HTTPException(404, f"review.html not found under {web_dir()}; set SIDELINE_WEB_DIR")
+        return FileResponse(page, media_type="text/html", headers={"Content-Security-Policy": REVIEW_CSP})
 
     def _latest_complete(store: ArtifactStore, match_id: str, stage: str) -> Optional[ArtifactRef]:
         ref = store.latest(match_id, stage)
         return ref if ref is not None and store.complete(ref) else None
+
+    def _events_of(store: ArtifactStore, match_id: str, version: int) -> tuple[ArtifactRef, dict, list[dict], list[dict]]:
+        """A complete events version with its manifest, rows and cue log,
+        or a 404/422 that says what is wrong."""
+        ref = ArtifactRef(match_id, "s8_events", version)
+        if not store.complete(ref):
+            raise HTTPException(422, f"no complete s8_events version {version} for this match")
+        manifest = store.read_manifest(ref)
+        return ref, manifest, store.read_table(ref, "events.parquet").to_pylist(), store.read_json(ref, "dead_balls.json")
+
+    def _tracks_version_of(manifest: dict) -> Optional[int]:
+        return next((i["version"] for i in manifest.get("inputs", []) if i["stage"] == "s3_tracking"), None)
 
     @app.get("/matches/{match_id}/review")
     def review_doc(match_id: str, request: Request) -> dict:
@@ -224,25 +259,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         vocabulary, the roster, every event of the latest events version
         with its verdict so far, and the versions the verdicts key on."""
         store: ArtifactStore = request.app.state.artifacts
+        s8 = _latest_complete(store, match_id, "s8_events")
+        tracks_version = _tracks_version_of(store.read_manifest(s8)) if s8 else None
         with session_scope(request.app.state.engine) as s:
             m = s.get(Match, match_id)
             if m is None:
                 raise HTTPException(404, "no such match")
             sport, roster, periods_node, kickoff = m.sport, m.roster, m.periods, m.kickoff_offset_ms
-            s8 = _latest_complete(store, match_id, "s8_events")
             decisions = (s.query(EventDecision).filter_by(match_id=match_id, events_version=s8.version)
                          .order_by(EventDecision.decided_at).all()) if s8 else []
-            names = {d.track_id: d.player_id for d in s.query(ReviewDecision).filter_by(match_id=match_id)
-                     .order_by(ReviewDecision.decided_at).all()}
+            # A name belongs to a track of one tracking version; the same id
+            # in a re-run is a different player. Only this version's names apply.
+            names = {d.track_id: d.player_id for d in s.query(ReviewDecision)
+                     .filter_by(match_id=match_id, tracks_version=tracks_version)
+                     .order_by(ReviewDecision.decided_at).all()} if tracks_version is not None else {}
         plugin = get_sport(sport)
         grammar = plugin.event_grammar(plugin.surface())
         s0 = _latest_complete(store, match_id, "s0_ingest")
         match_json = store.read_json(s0, "match.json") if s0 else {}
         events: list[dict] = []
-        tracks_version = None
         if s8 is not None:
-            manifest = store.read_manifest(s8)
-            tracks_version = next((i["version"] for i in manifest.get("inputs", []) if i["stage"] == "s3_tracking"), None)
             rows = store.read_table(s8, "events.parquet").to_pylist()
             log = store.read_json(s8, "dead_balls.json")
             periods = periods_from_sm(periods_node or {})
@@ -312,26 +348,48 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return Response(store.blobs.get(key), media_type="image/jpeg",
                         headers={"Cache-Control": "private, max-age=86400"})
 
+    def _decision_out(d: EventDecision) -> dict:
+        return {"id": d.id, "events_version": d.events_version, "tracks_version": d.tracks_version, "t_ms": d.t_ms,
+                "verdict": d.verdict, "corrected_type": d.corrected_type, "corrected_track": d.corrected_track,
+                "decided_by": d.decided_by, "decided_at": d.decided_at.isoformat(), "note": d.note}
+
     @app.post("/matches/{match_id}/review/decisions", status_code=201)
     def add_decision(match_id: str, body: DecisionIn, request: Request) -> dict:
-        """A verdict becomes a row. The event itself is never edited."""
+        """A verdict becomes a row. The event itself is never edited. These
+        rows are the labelled set that will score the rules and train a
+        classifier, so what goes in is checked against what exists: a real
+        events version, an event in it, a kind the sport knows, a track of
+        the tracking version that events version was built on."""
+        store: ArtifactStore = request.app.state.artifacts
+        sport = request.app.state.sport_of(match_id)          # 404 for a match this database does not know
         if body.verdict not in VERDICTS:
             raise HTTPException(422, f"verdict must be one of {VERDICTS}")
-        if body.verdict == "wrong_type" and not body.corrected_type:
-            raise HTTPException(422, "wrong_type needs corrected_type")
-        if body.verdict == "wrong_taker" and body.corrected_track is None:
-            raise HTTPException(422, "wrong_taker needs corrected_track")
+        _, manifest, rows, _ = _events_of(store, match_id, body.events_version)
+        if not any(r["t_ms"] == body.t_ms for r in rows):
+            raise HTTPException(422, f"no event at {body.t_ms} ms in s8_events v{body.events_version}")
+        tracks_version = _tracks_version_of(manifest)
+        plugin = get_sport(sport)
+        kinds = plugin.event_grammar(plugin.surface()).event_types
+        if body.verdict == "wrong_type":
+            if not body.corrected_type:
+                raise HTTPException(422, "wrong_type needs corrected_type")
+            if body.corrected_type not in kinds:
+                raise HTTPException(422, f"{body.corrected_type!r} is not an event type of {sport}: {list(kinds)}")
+        if body.verdict == "wrong_taker":
+            if body.corrected_track is None:
+                raise HTTPException(422, "wrong_taker needs corrected_track")
+            if tracks_version is None:
+                raise HTTPException(422, "this events version records no tracking version to name a track in")
+            frags = store.read_table(ArtifactRef(match_id, "s3_tracking", tracks_version), "fragments.parquet")
+            if not pc.any(pc.equal(frags["track_id"], body.corrected_track)).as_py():
+                raise HTTPException(422, f"track {body.corrected_track} is not in s3_tracking v{tracks_version}")
         with session_scope(request.app.state.engine) as s:
-            if s.get(Match, match_id) is None:
-                raise HTTPException(404, "no such match")
-            d = EventDecision(match_id=match_id, events_version=body.events_version, t_ms=body.t_ms, verdict=body.verdict,
-                              corrected_type=body.corrected_type, corrected_track=body.corrected_track,
-                              decided_by=body.decided_by, note=body.note)
+            d = EventDecision(match_id=match_id, events_version=body.events_version, tracks_version=tracks_version or 0,
+                              t_ms=body.t_ms, verdict=body.verdict, corrected_type=body.corrected_type,
+                              corrected_track=body.corrected_track, decided_by=body.decided_by, note=body.note)
             s.add(d)
             s.flush()
-            return {"id": d.id, "verdict": d.verdict, "t_ms": d.t_ms, "events_version": d.events_version,
-                    "corrected_type": d.corrected_type, "corrected_track": d.corrected_track,
-                    "decided_by": d.decided_by, "decided_at": d.decided_at.isoformat()}
+            return _decision_out(d)
 
     @app.get("/matches/{match_id}/review/decisions")
     def list_decisions(match_id: str, request: Request) -> list[dict]:
@@ -339,17 +397,27 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         that scores the rules and, one day, trains a classifier."""
         with session_scope(request.app.state.engine) as s:
             rows = s.query(EventDecision).filter_by(match_id=match_id).order_by(EventDecision.decided_at).all()
-            return [{"id": d.id, "events_version": d.events_version, "t_ms": d.t_ms, "verdict": d.verdict,
-                     "corrected_type": d.corrected_type, "corrected_track": d.corrected_track,
-                     "decided_by": d.decided_by, "decided_at": d.decided_at.isoformat(), "note": d.note} for d in rows]
+            return [_decision_out(d) for d in rows]
 
     @app.post("/matches/{match_id}/review/tracks", status_code=201)
     def name_track(match_id: str, body: TrackNameIn, request: Request) -> dict:
         """Who a track is: the identity decision the spec's review stage
-        makes, one click per linked track, replayed by a better S6 later."""
+        makes, one click per linked track, replayed by a better S6 later.
+        The track must exist in that tracking version, and a player must be
+        on the copied roster when there is one."""
+        store: ArtifactStore = request.app.state.artifacts
+        ref = ArtifactRef(match_id, "s3_tracking", body.tracks_version)
+        if not store.complete(ref):
+            raise HTTPException(422, f"no complete s3_tracking version {body.tracks_version} for this match")
+        frags = store.read_table(ref, "fragments.parquet")
+        if not pc.any(pc.equal(frags["track_id"], body.track_id)).as_py():
+            raise HTTPException(422, f"track {body.track_id} is not in s3_tracking v{body.tracks_version}")
         with session_scope(request.app.state.engine) as s:
-            if s.get(Match, match_id) is None:
+            m = s.get(Match, match_id)
+            if m is None:
                 raise HTTPException(404, "no such match")
+            if body.player_id is not None and m.roster and body.player_id not in m.roster:
+                raise HTTPException(422, f"{body.player_id!r} is not on this match's roster")
             d = ReviewDecision(match_id=match_id, tracks_version=body.tracks_version, track_id=body.track_id,
                                player_id=body.player_id, decided_by=body.decided_by, note=body.note)
             s.add(d)

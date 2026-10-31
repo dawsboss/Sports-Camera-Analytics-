@@ -90,9 +90,12 @@ tapping the right player; not an event. With a roster uploaded it also
 names the taker. Each tap is a row in the database (`event_decisions`,
 `review_decisions`), never an edit to an artifact, and
 `GET /matches/<id>/review/decisions` exports them. The frames the page
-shows are served by this API to browsers on this network and nowhere
-else: keep the API on the LAN or a Tailscale network, never on the open
-internet. The compose stack serves the same page at `:8000/review`.
+shows are most of the footage at 5 fps and are served by this API to
+browsers on this network and nowhere else: keep the API on the LAN or a
+Tailscale network, never on the open internet and never behind a public
+tunnel (the spec's Cloudflare Tunnel option does not apply to this API).
+There is no login. The compose stack serves the same page at
+`:8000/review`.
 
 ## Layout
 

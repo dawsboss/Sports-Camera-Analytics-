@@ -114,10 +114,11 @@ class EventDecision(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
     match_id: Mapped[str] = mapped_column(ForeignKey("matches.id"), index=True)
     events_version: Mapped[int] = mapped_column(Integer)
+    tracks_version: Mapped[int] = mapped_column(Integer)      # the S3 output the event's tracks belong to
     t_ms: Mapped[int] = mapped_column(Integer)
     verdict: Mapped[str] = mapped_column(String(16))          # right | wrong_type | wrong_taker | not_event
     corrected_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    corrected_track: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    corrected_track: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)   # a track of tracks_version
     decided_by: Mapped[str] = mapped_column(String(128))
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

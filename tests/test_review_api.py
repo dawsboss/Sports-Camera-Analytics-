@@ -95,3 +95,68 @@ def test_the_page_is_served_from_web(reviewed):
     c, _ = reviewed
     r = c.get("/review")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"] and "Sideline Review" in r.text
+
+
+def test_verdicts_are_checked_against_what_exists(reviewed):
+    c, match_id = reviewed
+    doc = c.get(f"/matches/{match_id}/review").json()
+    e = doc["events"][0]
+    ok = {"events_version": doc["events_version"], "t_ms": e["t_ms"]}
+    # A version that does not exist, an event that is not there, a kind the
+    # sport does not know, a track that is not in the tracking version.
+    assert c.post(f"/matches/{match_id}/review/decisions", json={**ok, "events_version": 9, "verdict": "right"}).status_code == 422
+    assert c.post(f"/matches/{match_id}/review/decisions", json={**ok, "t_ms": 12345, "verdict": "right"}).status_code == 422
+    r = c.post(f"/matches/{match_id}/review/decisions", json={**ok, "verdict": "wrong_type", "corrected_type": "slam_dunk"})
+    assert r.status_code == 422 and "not an event type" in r.text
+    assert c.post(f"/matches/{match_id}/review/decisions", json={**ok, "verdict": "wrong_taker", "corrected_track": 999}).status_code == 422
+    other = next(b["track_id"] for b in c.get(f"/matches/{match_id}/review/frames", params={"t_ms": e["t_ms"], "span_s": 0}).json()["frames"][0]["boxes"]
+                 if b["cls"] == "player" and b["track_id"] != e["taker_track"])
+    r = c.post(f"/matches/{match_id}/review/decisions", json={**ok, "verdict": "wrong_taker", "corrected_track": other})
+    assert r.status_code == 201 and r.json()["tracks_version"] == doc["tracks_version"] and r.json()["corrected_track"] == other
+
+
+def test_names_belong_to_one_tracking_version(reviewed):
+    c, match_id = reviewed
+    doc = c.get(f"/matches/{match_id}/review").json()
+    e = doc["events"][0]
+    # A name on a tracking version that does not exist is refused; one on a
+    # version that exists but is not the events' version is kept but not shown.
+    body = {"tracks_version": 7, "track_id": e["taker_track"], "player_id": "p7"}
+    assert c.post(f"/matches/{match_id}/review/tracks", json=body).status_code == 422
+    assert c.post(f"/matches/{match_id}/review/tracks", json={**body, "tracks_version": doc["tracks_version"], "track_id": 999}).status_code == 422
+    r = c.post(f"/matches/{match_id}/review/tracks", json={**body, "tracks_version": doc["tracks_version"]})
+    assert r.status_code == 201
+    assert c.get(f"/matches/{match_id}/review").json()["events"][0]["player_id"] == "p7"
+
+
+def test_a_player_must_be_on_the_roster_when_there_is_one(tmp_path, clip):
+    import json
+
+    settings = Settings(data_dir=tmp_path / "data", inline_jobs=True)
+    match_id = ingest_local(settings, clip, kickoff_offset_ms=400, stages=STAGES,
+                            config={"detector": ScriptedDetector(throw_in_scene), "detect_halftime": False})
+    from sideline.config import build_engine
+    from sideline.db import Match, session_scope
+    with session_scope(build_engine(settings)) as s:
+        s.get(Match, match_id).roster = {"p7": {"name": "A", "number": 7}}
+    with TestClient(create_app(settings)) as c:
+        doc = c.get(f"/matches/{match_id}/review").json()
+        body = {"tracks_version": doc["tracks_version"], "track_id": doc["events"][0]["taker_track"]}
+        assert c.post(f"/matches/{match_id}/review/tracks", json={**body, "player_id": "p99"}).status_code == 422
+        assert c.post(f"/matches/{match_id}/review/tracks", json={**body, "player_id": "p7"}).status_code == 201
+        assert c.post(f"/matches/{match_id}/review/tracks", json={**body, "player_id": None}).status_code == 201
+        assert doc["roster"]["p7"]["number"] == 7
+
+
+def test_the_page_carries_a_same_origin_policy_and_can_live_where_the_image_puts_it(reviewed, tmp_path, monkeypatch):
+    c, _ = reviewed
+    r = c.get("/review")
+    csp = r.headers["content-security-policy"]
+    assert "default-src 'self'" in csp and "connect-src 'self'" in csp and "img-src 'self'" in csp
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    (other / "review.html").write_text("<!doctype html><title>Sideline Review</title>moved")
+    monkeypatch.setenv("SIDELINE_WEB_DIR", str(other))
+    assert "moved" in c.get("/review").text
+    monkeypatch.setenv("SIDELINE_WEB_DIR", str(tmp_path / "nowhere"))
+    assert c.get("/review").status_code == 404

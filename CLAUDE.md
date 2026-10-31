@@ -81,9 +81,13 @@ what surrounded it in heights of the taker, never in metres or pixels.
   soccer-manager and bridged through `timeline.py` (`match_seconds`,
   `on_pitch`). Roster, stints and periods are copied at upload, never
   linked, so a roster edit a month later does not change an analysis.
-- **Raw video never leaves the homelab.** The API serves JSON artifacts
-  only; frames, video and Parquet are read by stages and the review UI
-  through the blob store. Only `player_stats.json` goes to Firebase.
+- **Nothing derived from the video leaves the network.** The API serves
+  JSON artifacts and, for the review page, S1's sampled frames and S3's
+  boxes to browsers on the LAN or a Tailscale network; at 5 fps that is
+  most of the footage, so the API is never exposed to the internet and
+  never put behind a public tunnel. Video and Parquet are never served.
+  Only `player_stats.json` goes to Firebase. (Amended 31 October when the
+  owner asked for the review page to be hosted on his own network.)
 - **The camera side is a convention, not a detection.** The pitch is
   symmetric under a half turn, so `FollowCamConfig.camera_side` says which
   touchline the camera stands on (default `y < 0`), and pitch x is
@@ -187,13 +191,16 @@ what surrounded it in heights of the taker, never in metres or pixels.
   the goal detector above. `sideline overlay` renders what the stages saw
   so a run can be watched.
 - **The review page is for events only and the verdicts are not read back
-  yet.** `web/review.html`, served by the API at `/review`, writes
-  `EventDecision` rows (right / wrong kind / wrong taker / not an event)
-  and `ReviewDecision` rows for a track's name. Nothing consumes them: the
-  scorer still reads only the minutes app's taps, S6 does not exist, and
-  a new events version starts with no verdicts. Replaying them by time
-  onto a new version, and scoring against them, is the next step. The
-  API serves S1's frames to browsers; it is for the LAN or Tailscale only.
+  yet.** `web/review.html`, served by the API at `/review` with a
+  same-origin content policy, writes `EventDecision` rows (right / wrong
+  kind / wrong taker / not an event, each checked against a real events
+  version, an event in it, the sport's event types and a track of the
+  tracking version it was built on) and `ReviewDecision` rows for a
+  track's name, scoped to that tracking version. Nothing consumes them:
+  the scorer still reads only the minutes app's taps, S6 does not exist,
+  and a new events version starts with no verdicts. Replaying them by time
+  onto a new version, and scoring against them, is the next step. There
+  is no login; `decided_by` is whatever the reviewer typed.
 - No S4 team assignment, S6 identity, S8 stats or S9 publish; S7 review
   exists for events only. `contracts.py` already defines what they write.
   Events carry the taker as a `track_id`; the name arrives as a review

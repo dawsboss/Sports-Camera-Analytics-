@@ -101,6 +101,9 @@
   const qs = new URLSearchParams(location.search);
   const matchId = qs.get('match');
   const $ = id => document.getElementById(id);
+  // Roster names, verdict kinds and reasons are free text from the API's
+  // database; nothing from them is ever interpreted as markup.
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const canvas = $('c'), ctx = canvas.getContext('2d');
   const state = { doc: null, i: -1, frames: [], f: 0, images: new Map(), playing: null, pickTaker: false, kinds: {} };
   $('by').value = localStorage.getItem('sideline.review.by') || '';
@@ -140,8 +143,8 @@
       const row = document.createElement('div');
       row.className = 'ev' + (i === state.i ? ' sel' : '');
       row.dataset.i = i;
-      const badge = e.decision ? `<span class="badge ${e.decision.verdict}">${e.decision.verdict.replace('_', ' ')}</span>` : `<span class="badge">${e.confidence}</span>`;
-      row.innerHTML = `<span class="clock">${e.clock}</span><span><div class="kind">${kindOf(e).replace('_', ' ')}</div><div class="who">${who(e)}</div></span>${badge}`;
+      const badge = e.decision ? `<span class="badge ${esc(e.decision.verdict)}">${esc(e.decision.verdict.replace('_', ' '))}</span>` : `<span class="badge">${esc(e.confidence)}</span>`;
+      row.innerHTML = `<span class="clock">${esc(e.clock)}</span><span><div class="kind">${esc(kindOf(e).replace('_', ' '))}</div><div class="who">${esc(who(e))}</div></span>${badge}`;
       row.addEventListener('click', () => select(i));
       el.appendChild(row);
     });
@@ -161,12 +164,12 @@
     state.frames.forEach(f => { if (f.cached) { const im = new Image(); im.src = f.url; im.onload = () => { if (state.frames[state.f] === f) draw(); }; state.images.set(f.frame_index, im); } });
     showFrame(best);
     $('caption').hidden = false;
-    $('caption').innerHTML = `<span>${e.clock}</span><b>${kindOf(e).replace('_', ' ').toUpperCase()}</b><span>${who(e)}</span><span class="conf">${e.confidence}</span><span class="why">${e.reason}</span>`;
+    $('caption').innerHTML = `<span>${esc(e.clock)}</span><b>${esc(kindOf(e).replace('_', ' ').toUpperCase())}</b><span>${esc(who(e))}</span><span class="conf">${esc(e.confidence)}</span><span class="why">${esc(e.reason)}</span>`;
     const roster = state.doc.roster || {};
     const ids = Object.keys(roster);
     $('roster').hidden = $('name').hidden = !ids.length;
     if (ids.length) {
-      $('roster').innerHTML = ids.map(id => `<option value="${id}">${roster[id].number != null ? '#' + roster[id].number + ' ' : ''}${roster[id].name || id}</option>`).join('');
+      $('roster').innerHTML = ids.map(id => `<option value="${esc(id)}">${roster[id].number != null ? '#' + esc(roster[id].number) + ' ' : ''}${esc(roster[id].name || id)}</option>`).join('');
     }
     state.pickTaker = false; $('hint').hidden = true; $('wrongtaker').classList.remove('on');
   }
@@ -263,7 +266,7 @@
 
   api(`/matches/${matchId}/review`).then(doc => {
     state.doc = doc;
-    $('kind').innerHTML = doc.event_types.map(t => `<option value="${t}">${t.replace('_', ' ')}</option>`).join('');
+    $('kind').innerHTML = doc.event_types.map(t => `<option value="${esc(t)}">${esc(t.replace('_', ' '))}</option>`).join('');
     renderList();
     const first = doc.events.findIndex(e => !e.decision);
     if (doc.events.length) select(first >= 0 ? first : 0);

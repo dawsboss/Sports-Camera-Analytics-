@@ -117,6 +117,9 @@ def _serve(args: argparse.Namespace) -> int:
     # same network with no services.
     if args.data:
         os.environ["SIDELINE_DATA_DIR"] = args.data
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print("serving the review page and sampled frames to every device on this network; "
+              "keep this port off the internet (no public tunnel), or bind --host 127.0.0.1", file=sys.stderr)
     uvicorn.run("sideline.api.app:app", host=args.host, port=args.port, reload=False)
     return 0
 

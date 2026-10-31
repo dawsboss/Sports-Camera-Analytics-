@@ -411,7 +411,9 @@ the questions a coach asks about a run.
   pipeline's own frames and boxes, so it is served by the pipeline.
   `sideline serve --data ./data` on the machine that ran the match is
   enough; a phone on the same wifi opens the page. Never expose the API to
-  the open internet: it serves frames.
+  the open internet or put it behind a public tunnel: it serves frames,
+  which at 5 fps are most of the footage. Tailscale is the way in from
+  outside; the spec's Cloudflare Tunnel option does not apply to this API.
 
 **The flag and the net.** The coach's own cue for corner against goal
 kick is the right one: a ball by the corner flag is a corner, a ball in
