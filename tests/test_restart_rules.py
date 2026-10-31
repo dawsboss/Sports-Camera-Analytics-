@@ -10,7 +10,7 @@ def _obs(**over) -> DeadBall:
     base = dict(
         t_ms=60_000, still_s=2.0, taker_track=7, taker_cls="player", taker_team=None, held=False,
         ball_rel_y=0.95, ball_u=0.5, ball_v=0.6, n_visible=8, nearest_h=1.2, n_near=3,
-        extreme_h=-2.0, release_speed_h=6.0, since_period_start_s=600.0, first_in_period=False,
+        extreme_h=-2.0, landmarks_h={}, release_speed_h=6.0, since_period_start_s=600.0, first_in_period=False,
         roles_known=True,
     )
     base.update(over)
@@ -63,3 +63,18 @@ def test_grammar_lists_the_restart_types_as_event_types():
     assert {"throw_in", "corner", "goal_kick", "free_kick", "kick_off", "keeper_claim", "restart"} <= set(g.event_types)
     assert set(g.restart_types) <= set(g.event_types) and "touch" in g.event_types
     assert g.dead_ball_min_s > 0 and g.release_speed_h > 0
+
+
+def test_the_flag_names_a_corner_and_the_goal_a_goal_kick_whatever_the_detector_calls_the_taker():
+    soccer = get_sport("soccer")
+    alone = dict(nearest_h=4.0, n_near=0, extreme_h=3.0, roles_known=False)
+    # With no landmark in frame this scene cannot be told apart.
+    assert soccer.classify_restart(_obs(**alone)).type == "restart"
+    flag = soccer.classify_restart(_obs(landmarks_h={"corner_flag": 1.5, "goal": 20.0}, **alone))
+    assert flag.type == "corner" and flag.confidence >= 0.8
+    goal = soccer.classify_restart(_obs(landmarks_h={"goal": 4.0}, **alone))
+    assert goal.type == "goal_kick"
+    # A flag far away is no cue; a goal far away is no cue.
+    assert soccer.classify_restart(_obs(landmarks_h={"corner_flag": 12.0, "goal": 25.0}, **alone)).type == "restart"
+    # The ball in hand is a throw-in even next to the flag.
+    assert soccer.classify_restart(_obs(held=True, landmarks_h={"corner_flag": 1.0})).type == "throw_in"

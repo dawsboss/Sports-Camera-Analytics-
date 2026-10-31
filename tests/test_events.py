@@ -250,3 +250,37 @@ def test_scale_is_the_height_of_the_person_nearest_the_ball():
     assert local_height(f, np.array([1480.0, 300.0]), 60.0) == 40.0
     assert local_height(f, np.array([320.0, 880.0]), 60.0) == 80.0
     assert local_height(Frame(0, 0, [], []), np.zeros(2), 60.0) == 60.0
+
+
+def test_a_landmark_in_frame_is_the_camera_motion_and_names_the_restart(soccer, grammar):
+    """The same lone taker at the end of the pitch, with a COCO detector
+    that calls everyone a player: a corner flag by the ball makes it a
+    corner, and the goal frame makes it a goal kick. The flag is fixed
+    scenery, so its shift between frames is the pan exactly, even while
+    every player drifts."""
+    from sideline.events import camera_shifts_from_people
+
+    def scene(landmark, at):
+        s = Scene(pan=6.0)
+        for k in range(20):
+            drift = 3.0 * k
+            s.people(k, [(900 + drift, 600), (1000 + drift, 650), (1100 + drift, 620), (1200 + drift, 700), (1050 + drift, 560)])
+            s.people(k, [(250, 820)], ids=[9])
+            x, y = at
+            s.rows.append({"frame_index": k, "t_ms": k * DT, "track_id": 40, "cls": landmark,
+                           "x1": x - 20 + s.shift(k), "y1": y - 120, "x2": x + 20 + s.shift(k), "y2": y, "conf": 0.9})
+            if k < 12:
+                s.ball(k, 230, 830)
+            else:
+                s.ball(k, 230 + 90 * (k - 11), 830 - 50 * (k - 11))
+        return s
+    flag_scene = scene("corner_flag", (260, 840))
+    frames = frames_from_rows(flag_scene.rows, ["ball"], ["corner_flag", "goal"])
+    assert all(len(f.landmarks) == 1 and len(f.people) == 6 for f in frames)
+    assert np.allclose(camera_shifts_from_people(frames)[3], [6.0, 0.0])      # the flag, not the drifting players
+    dead = find_dead_balls(frames, grammar, SIZE)
+    assert len(dead) == 1 and dead[0].landmarks_h["corner_flag"] < 1.0 and not dead[0].roles_known
+    assert soccer.classify_restart(dead[0]).type == "corner"
+    goal_frames = frames_from_rows(scene("goal", (380, 840)).rows, ["ball"], ["corner_flag", "goal"])
+    d = find_dead_balls(goal_frames, grammar, SIZE)[0]
+    assert "goal" in d.landmarks_h and soccer.classify_restart(d).type == "goal_kick"

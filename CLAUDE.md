@@ -170,8 +170,22 @@ what surrounded it in heights of the taker, never in metres or pixels.
   soccer plugin names them. All of it is tested on scripted scenes only.
   The confidences in `SoccerPlugin.classify_restart` are priors until
   `spike/evals/restarts_on_taps.py` has run on both Veo exports against
-  the minutes app's taps. Corner against goal kick cannot be told apart
-  until S4 labels the keeper; the plugin says `restart` there, not a guess.
+  the minutes app's taps. Only detection is a trained model (a COCO
+  checkpoint nobody here trained); tracking and the restart rules are
+  rules, and corrections set their thresholds rather than train them.
+- **Corner against goal kick is told apart by the corner flag and the goal**,
+  which the soccer plugin declares as landmark entity classes, or by the
+  keeper once S4 labels her. No detector emits `goal` or `corner_flag`
+  yet: goal posts and crossbars are annotated in SoccerNet calibration
+  (25k frames) and can be pretrained from there; corner flags need our own
+  box tags. Until a detector does, the plugin says `restart` there, not a
+  guess. A landmark seen in two frames is also the exact camera motion,
+  which the people estimate only approximates.
+- **No open-play events yet** (passes, crosses, turnovers). A cross without
+  pitch coordinates is a long aerial ball ending near the goal landmark;
+  it needs the ball held through flight, which is the blackout tail, and
+  the goal detector above. `sideline overlay` renders what the stages saw
+  so a run can be watched; there is no review page yet to correct it.
 - No S4 team assignment, S6 identity, S7 review, S8 stats or S9 publish.
   `contracts.py` already defines what they write. Events carry the taker
   as a `track_id`; the name arrives as a review decision or from S6, and
@@ -185,8 +199,9 @@ what surrounded it in heights of the taker, never in metres or pixels.
 
 ## Conventions
 
-- Commit messages: short summary line, blank line, body explaining *why*.
-  Every shipped change gets a `CHANGELOG.md` entry.
+- Commit messages: short summary line, blank line, body explaining *why*,
+  with the numbers. The commit body is the record; `CHANGELOG.md` stopped
+  at 0.1.14 (31 October) and is not maintained. `git log` is the history.
 - Comments explain reasoning, not mechanics; the invariants above set the tone.
 - No AI model is called from this pipeline's runtime, and none from
   soccer-manager ever.
@@ -198,8 +213,8 @@ design. Using them is standing permission from the user.
 
 - **git-shepherd** does every commit, pull, push, PR and branch deletion
   (`/sync`, `/ship`, `/pr`).
-  - Give it the *why*. It writes the commit message and CHANGELOG entry
-    to `.claude/skills/house-style`.
+  - Give it the *why*. It writes the commit message to
+    `.claude/skills/house-style`.
   - It merges both the branch's remote and its base.
   - It stops on a conflict or a failing test, and never force-pushes.
   - After a PR it offers the branch for deletion: only the local branch

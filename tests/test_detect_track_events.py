@@ -190,3 +190,40 @@ def test_the_write_down_is_a_csv_with_the_match_clock_and_the_cli_prints_it(tmp_
     assert main(["log", match_id, "--data", str(tmp_path / "data"), "--csv"]) == 0
     assert capsys.readouterr().out.startswith("clock,clock_basis,t_ms,event")
     assert main(["log", "nope", "--data", str(tmp_path / "data")]) == 1
+
+
+def test_overlay_renders_the_run_with_the_event_captioned(tmp_path, clip):
+    import cv2
+
+    from sideline.cli import main
+    from sideline.config import Settings, build_blobs
+    from sideline.overlay import render_overlay
+    from sideline.pipeline import ingest_local
+    from sideline.storage import ArtifactStore
+
+    settings = Settings(data_dir=tmp_path / "data", inline_jobs=True)
+    match_id = ingest_local(settings, clip, kickoff_offset_ms=0,
+                            stages=["s0_ingest", "s1_sampling", "s2_detection", "s3_tracking", "s8_events"],
+                            config={"detector": ScriptedDetector(throw_in_scene), "detect_halftime": False})
+    store = ArtifactStore(build_blobs(settings))
+    out = tmp_path / "overlay.mp4"
+    info = render_overlay(store, match_id, out, object_classes={"ball"})
+    assert info["frames"] == 15 and info["events"] == 1 and out.exists()
+    cap = cv2.VideoCapture(str(out))
+    assert cap.isOpened() and int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) == 15 and cap.get(cv2.CAP_PROP_FPS) == 5.0
+    frames = []
+    while True:
+        ok, f = cap.read()
+        if not ok:
+            break
+        frames.append(f)
+    cap.release()
+    # The caption bar is drawn only while the event is live: dark top rows
+    # from the release (1.6 s) on, and not at the start.
+    assert frames[0][:10].mean() > 60 and frames[9][:10].mean() < 40
+    # Only the seconds around the event, at a chosen rate.
+    short = tmp_path / "short.mp4"
+    # Samples at 1.2, 1.4, 1.6, 1.8 and 2.0 s lie within half a second of the release at 1.6 s.
+    assert render_overlay(store, match_id, short, around_s=0.5, fps=10, object_classes={"ball"})["frames"] == 5
+    assert main(["overlay", match_id, "--data", str(tmp_path / "data"), "--out", str(tmp_path / "cli.mp4")]) == 0
+    assert (tmp_path / "cli.mp4").exists()

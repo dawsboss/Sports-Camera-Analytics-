@@ -760,3 +760,10 @@ restart. None of it has met real footage.
   is unchanged on purpose, since it is a copy of the living doc; the
   `track_id` column and the restart types are the change to carry back
   to it.
+
+## Retired
+
+This file stops here, on 31 October 2026, at the owner's request. The
+history continues in `git log`; each commit's body carries what an entry
+here used to: what was wrong or unknown, what was measured, what changed,
+and the numbers.

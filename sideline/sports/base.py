@@ -84,6 +84,11 @@ class EntityClass:
     # event rules measure everything in heights of the people, so the stages
     # need to know which is which without knowing what the object is called.
     object: bool = False
+    # Fixed scenery the sport names (a goal, a corner flag, a basket). Not a
+    # person: it sets no height scale and is never a taker. Where one is seen
+    # in two frames it is the camera's exact motion, and its distance from a
+    # dead ball is a cue the sport's rules read by its name.
+    landmark: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,6 +138,7 @@ class DeadBall:
     nearest_h: Optional[float]           # nearest other player to the ball, in taker heights
     n_near: int                          # other players within the grammar's `near_h` of the ball
     extreme_h: Optional[float]           # how far the ball lies beyond every other player on some axis; negative when it is among them
+    landmarks_h: dict[str, float]        # nearest seen landmark of each class, by name, in taker heights; empty when none is in frame
     release_speed_h: Optional[float]     # ball speed just after release, heights per second; None if it left the frame
     since_period_start_s: Optional[float]  # seconds since the period began, when the timeline is known
     first_in_period: bool                # no earlier dead ball in this period

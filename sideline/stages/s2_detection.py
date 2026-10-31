@@ -51,7 +51,9 @@ class DetectionStage:
 
         detector: Detector = ctx.config.get("detector") or build_detector(ctx.config.get("detectors"))
         sport = get_sport(m.sport)
-        object_classes = {c.name for c in sport.entity_classes() if c.object}
+        # The surface filter judges feet; the ball and the sport's fixed
+        # landmarks have none and pass through.
+        object_classes = {c.name for c in sport.entity_classes() if c.object or c.landmark}
         use_grass = ctx.config.get("grass_filter")
         if use_grass is None:
             use_grass = bool(getattr(sport, "surface_is_grass", False))

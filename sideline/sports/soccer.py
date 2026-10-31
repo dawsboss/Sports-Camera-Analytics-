@@ -154,6 +154,10 @@ ENTITY_CLASSES: tuple[EntityClass, ...] = (
     EntityClass("goalkeeper", expected=2, maximum=2),
     EntityClass("official", expected=1, maximum=4),
     EntityClass("ball", expected=1, maximum=1, object=True),
+    # The scenery that names a restart: a ball by the flag is a corner, a
+    # ball in front of the net is a goal kick. No detector emits these yet.
+    EntityClass("goal", expected=2, maximum=2, landmark=True),
+    EntityClass("corner_flag", expected=4, maximum=4, landmark=True),
 )
 
 _BOTH = frozenset({CaptureMode.STATIC, CaptureMode.FOLLOWCAM})
@@ -230,14 +234,15 @@ class SoccerPlugin:
         Each restart has a physical signature a camera sees without knowing
         where on the pitch it stood. A throw-in is the one restart taken
         with the ball in the hands, above the head. A keeper with the ball
-        in hand is a claim, not a restart. A keeper putting a grounded ball
-        back is a goal kick. The first dead ball of a period is the
+        in hand is a claim, not a restart. A grounded ball by the corner
+        flag is a corner; one in front of the goal, or put back by the
+        keeper, is a goal kick. The first dead ball of a period is the
         kick-off. What is left is a grounded ball taken by an outfield
-        player: alone, with everyone else beyond the ball, that is a corner
-        (or a goal kick where the detector cannot tell a keeper from a
-        player, and the call says so); among other players it is a free
-        kick. The confidences are priors, to be set by measurement against
-        the minutes app's taps, not tuned here.
+        player with no flag or goal in sight: alone, with everyone else
+        beyond the ball, that is a corner (or a goal kick where the detector
+        cannot tell a keeper from a player, and the call says so); among
+        other players it is a free kick. The confidences are priors, to be
+        set by measurement against the minutes app's taps, not tuned here.
         """
         keeper = obs.taker_cls == "goalkeeper"
         if obs.held:
@@ -245,10 +250,16 @@ class SoccerPlugin:
                 return RestartCall("keeper_claim", 0.8, "ball in the keeper's hands")
             sure = 0.9 if obs.still_s >= 1.0 else 0.7
             return RestartCall("throw_in", sure, "ball held high in the taker's box before release")
+        flag = obs.landmarks_h.get("corner_flag")
+        goal = obs.landmarks_h.get("goal")
+        if flag is not None and flag <= 3.0:
+            return RestartCall("corner", 0.85, "grounded ball by the corner flag")
         if obs.first_in_period and obs.since_period_start_s is not None and obs.since_period_start_s <= 90.0:
             return RestartCall("kick_off", 0.8, "first dead ball of the period")
         if keeper:
             return RestartCall("goal_kick", 0.7, "the keeper put a grounded ball back into play")
+        if goal is not None and goal <= 8.0:
+            return RestartCall("goal_kick", 0.7, "grounded ball in front of the goal")
         if obs.taker_track is None:
             return RestartCall("restart", 0.3, "nobody within reach of the still ball")
         alone = obs.nearest_h is None or obs.nearest_h >= 3.0

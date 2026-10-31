@@ -375,6 +375,62 @@ no model and no footage, on scripted scenes of each restart:
   separates "dead ball found but misnamed" from "missed", because they are
   different failures.
 
+**Watching it, and steering it (31 October, later).** Three answers to
+the questions a coach asks about a run.
+
+- *Is this a trained model?* Only the detector is, and nobody here trained
+  it: S2 is a COCO checkpoint that knows what a person and a ball look
+  like. Tracking is rules. Finding a dead ball is rules. Naming it is rules
+  in the soccer plugin, with thresholds in heights and confidences that
+  are priors. So a correction does not "train" anything today; it measures
+  the rules and moves a threshold, which `restarts_on_taps.py` does from
+  the minutes app's taps. A trained event classifier is possible later,
+  and the taps plus corrections are exactly its training set; it would sit
+  behind `classify_restart` and the stage would not know.
+- *Can I watch it?* `sideline overlay <match>` renders the sampled frames
+  with every fragment drawn, the ball's recent path, and at each event a
+  caption with the clock, the call, the taker and the reason;
+  `--around 8` keeps only the seconds around events. `sideline log`
+  prints the same list. Neither exists in a browser yet.
+- *Can I steer it?* Not yet. The piece that would is M6's review UI,
+  scoped to events first: play the match at each event (the tagger
+  already plays the Veo cut from its CDN with no backend), draw the taker
+  and the ball, and take one of four taps: right; wrong kind, pick the
+  kind; wrong taker, tap the right box; not an event. Each tap is a row
+  (a `ReviewDecision` on the event's track, or an event correction beside
+  it), never an edit to the artifact. Those rows do two things: they
+  score the rules per kind alongside the taps, and they accumulate into
+  the labelled set a learned classifier would train on. That page is the
+  next build after the first real run, because the first real run is
+  what says which corrections are common.
+
+**The flag and the net.** The coach's own cue for corner against goal
+kick is the right one: a ball by the corner flag is a corner, a ball in
+front of the net is a goal kick, whatever the detector calls the taker.
+The soccer plugin now declares `goal` and `corner_flag` as landmark
+entity classes, the event stage reports each landmark's distance from
+the dead ball in taker heights (`DeadBall.landmarks_h`, by name, knowing
+nothing of what a flag is), and the rules read them ahead of the keeper.
+A landmark seen in two frames is also the camera's motion exactly, which
+the people estimate only approximates, so the fallback improves the
+moment one is detected. What is missing is a detector that emits them.
+Goal posts and crossbars are annotated as named lines in SoccerNet's
+calibration set (25k broadcast frames; `spike/evals/soccernet.py`
+downloads it), so a goal detector can be pretrained there and shown this
+footage. Corner flags are annotated nowhere public, so they need our own
+box tags: a box mode in the tagger, a few dozen per field.
+
+**Crosses.** A cross without pitch coordinates is a long aerial ball
+played from far from the goal to near it: the ball leaves a player's
+reach, travels many heights, and comes down within a few heights of the
+goal landmark among players. That is an open-play event, the first that
+is not a dead ball, and it has two dependencies, both already on the
+list: the goal detector above, and the ball held through flight, where a
+white ball against the trees is exactly the measured blackout. So
+crosses follow the goal detector and the first real ball numbers; the
+rule itself is small. Corners are crosses too, which is one more reason
+the flag matters.
+
 **Who took it.** Today the answer is a track: the box nearest the ball when
 it was released. The name comes two ways, neither needing registration.
 Identity resolution (S6) links fragments to the roster through kit colour

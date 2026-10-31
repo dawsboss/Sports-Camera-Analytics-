@@ -82,6 +82,7 @@ class EventsStage:
         surface = sport.surface(m.pitch_length, m.pitch_width)
         grammar = sport.event_grammar(surface)
         object_classes = [c.name for c in sport.entity_classes() if c.object]
+        landmark_classes = [c.name for c in sport.entity_classes() if c.landmark]
 
         # Period starts in video time, through the timeline: the kickoff the
         # coach supplied and the periods the minutes app recorded, copied at
@@ -104,7 +105,7 @@ class EventsStage:
             starts, source = [int(x) for x in ctx.config["period_starts_ms"]], "config"
 
         rows = ctx.artifacts.read_table(s3, "fragments.parquet").to_pylist()
-        frames = frames_from_rows(rows, object_classes)
+        frames = frames_from_rows(rows, object_classes, landmark_classes)
         size = (match["width"], match["height"])
 
         # The camera's motion between samples. Registration is the stage that
@@ -145,7 +146,8 @@ class EventsStage:
                          "merge_s": float(ctx.config.get("merge_s", 2.0)),
                          "grammar": {k: getattr(grammar, k) for k in (
                              "dead_ball_min_s", "still_radius_h", "release_speed_h", "reach_h", "held_rel_y",
-                             "held_above_h", "near_h")}},
+                             "held_above_h", "near_h")},
+                         "landmark_classes": landmark_classes},
             inputs=[i for i in (s3, s0, s5 if from_registration else None) if i is not None],
             capture_mode=m.capture_mode, stage_version=self.version,
             pipeline_version=ctx.pipeline_version, outputs=["events.parquet", "events.csv", "dead_balls.json"],

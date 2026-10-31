@@ -26,7 +26,7 @@ frame zoomed to the corner and at the far end of a static camera's view.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
 import numpy as np
@@ -64,6 +64,7 @@ class Frame:
     t_ms: int
     people: list[Box]
     objects: list[Box]
+    landmarks: list[Box] = field(default_factory=list)
 
 
 @dataclass
@@ -75,27 +76,37 @@ class Candidate:
     period: Optional[int]
 
 
-def frames_from_rows(rows: Iterable[dict], object_classes: Iterable[str]) -> list[Frame]:
-    """Fragment rows (FRAGMENTS_SCHEMA) grouped into frames in time order."""
-    objs = set(object_classes)
+def frames_from_rows(rows: Iterable[dict], object_classes: Iterable[str],
+                     landmark_classes: Iterable[str] = ()) -> list[Frame]:
+    """Fragment rows (FRAGMENTS_SCHEMA) grouped into frames in time order:
+    the object of play, the sport's fixed landmarks, and everyone else."""
+    objs, lands = set(object_classes), set(landmark_classes)
     by: dict[int, Frame] = {}
     for r in rows:
         f = by.get(r["frame_index"])
         if f is None:
             f = by[r["frame_index"]] = Frame(r["frame_index"], r["t_ms"], [], [])
         b = Box(r["track_id"], r["cls"], r["x1"], r["y1"], r["x2"], r["y2"])
-        (f.objects if r["cls"] in objs else f.people).append(b)
+        (f.objects if r["cls"] in objs else f.landmarks if r["cls"] in lands else f.people).append(b)
     return [by[k] for k in sorted(by)]
 
 
 def camera_shifts_from_people(frames: Sequence[Frame], min_common: int = 2) -> list[np.ndarray]:
-    """The camera's motion from each frame to the next, estimated as the
-    median shift of the people seen in both. Zero where too few were, which
-    on a cut to an empty frame is wrong and harmless: nothing is still
-    across a cut. This is the fallback for frames registration could not
-    place; see `camera_shifts_from_registration`."""
+    """The camera's motion from each frame to the next, estimated from what
+    is seen in both. A landmark is fixed scenery, so one seen twice is the
+    camera's motion exactly and is preferred; failing that, the median shift
+    of the people, which is right for a pan and wrong for the second in
+    which most of them jog the same way. Zero where too few were seen,
+    which on a cut to an empty frame is wrong and harmless: nothing is
+    still across a cut. This is the fallback for frames registration could
+    not place; see `camera_shifts_from_registration`."""
     out = [np.zeros(2)]
     for prev, cur in zip(frames, frames[1:]):
+        la = {b.track_id: b.centre for b in prev.landmarks}
+        fixed = [(la[b.track_id], b.centre) for b in cur.landmarks if b.track_id in la]
+        if fixed:
+            out.append(np.median(np.array([c - p for p, c in fixed]), axis=0))
+            continue
         a = {b.track_id: b.centre for b in prev.people}
         common = [(a[b.track_id], b.centre) for b in cur.people if b.track_id in a]
         if len(common) >= min_common:
@@ -315,6 +326,11 @@ def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j
         c = np.array([p.centre for p in others])
         margins = [max(c[:, a].min() - ball[a], ball[a] - c[:, a].max()) for a in (0, 1)]
         extreme_h = float(max(margins)) / scale
+    landmarks_h: dict[str, float] = {}
+    for lm in end_frame.landmarks:
+        d = lm.gap_to(ball) / scale
+        if lm.cls not in landmarks_h or d < landmarks_h[lm.cls]:
+            landmarks_h[lm.cls] = float(d)
 
     period, since = None, None
     starts = sorted(period_starts_ms)
@@ -326,6 +342,7 @@ def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j
         taker_track=taker_id, taker_cls=taker.cls if taker is not None else (boxes_by_frame[max(boxes_by_frame)].cls if boxes_by_frame else None),
         taker_team=None, held=bool(held), ball_rel_y=float(np.median(rel_ys)) if rel_ys else None,
         ball_u=float(ball[0] / W), ball_v=float(ball[1] / H), n_visible=len(others), nearest_h=nearest_h,
-        n_near=n_near, extreme_h=extreme_h, release_speed_h=speed, since_period_start_s=since,
+        n_near=n_near, extreme_h=extreme_h, landmarks_h=landmarks_h, release_speed_h=speed,
+        since_period_start_s=since,
     )
     return Candidate(obs=obs, period=period)
