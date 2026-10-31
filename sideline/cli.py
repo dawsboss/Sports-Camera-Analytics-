@@ -76,6 +76,18 @@ def _log(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sport_of(settings, match_id: str) -> str:
+    """The match's own sport, from its record; soccer only if the match is
+    not in this database (artifacts copied in from elsewhere)."""
+    from sideline.config import build_engine
+    from sideline.db.models import Match
+    from sideline.db.session import session_scope
+
+    with session_scope(build_engine(settings)) as s:
+        m = s.get(Match, match_id)
+        return m.sport if m is not None else "soccer"
+
+
 def _overlay(args: argparse.Namespace) -> int:
     """Render what the stages saw, to watch a run decide."""
     from sideline.config import Settings, build_blobs
@@ -85,7 +97,8 @@ def _overlay(args: argparse.Namespace) -> int:
 
     settings = Settings.from_env(data_dir=Path(args.data))
     store = ArtifactStore(build_blobs(settings))
-    objects = {c.name for c in get_sport(args.sport).entity_classes() if c.object}
+    sport = args.sport or _sport_of(settings, args.match_id)
+    objects = {c.name for c in get_sport(sport).entity_classes() if c.object}
     out = Path(args.out) if args.out else Path(args.data) / f"{args.match_id}_overlay.mp4"
     info = render_overlay(store, args.match_id, out, around_s=args.around, hold_s=args.hold,
                           fps=args.fps, object_classes=objects)
@@ -155,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--around", type=float, default=None, help="only the seconds around each event, e.g. 8")
     o.add_argument("--hold", type=float, default=3.0, help="seconds an event's caption stays up")
     o.add_argument("--fps", type=float, default=None, help="playback rate; default is the sample rate")
-    o.add_argument("--sport", default="soccer")
+    o.add_argument("--sport", default=None, help="default: the match's own sport from its record")
     o.set_defaults(fn=_overlay)
 
     v = sub.add_parser("serve", help="run the API")

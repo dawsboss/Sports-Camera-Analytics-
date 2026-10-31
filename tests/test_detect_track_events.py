@@ -227,3 +227,37 @@ def test_overlay_renders_the_run_with_the_event_captioned(tmp_path, clip):
     assert render_overlay(store, match_id, short, around_s=0.5, fps=10, object_classes={"ball"})["frames"] == 5
     assert main(["overlay", match_id, "--data", str(tmp_path / "data"), "--out", str(tmp_path / "cli.mp4")]) == 0
     assert (tmp_path / "cli.mp4").exists()
+
+
+def corner_scene(k: int) -> list[Detection]:
+    # A lone taker by a corner flag with a grounded ball, everyone else off
+    # toward the goal; the ball is struck at sample 9. The flag is scenery:
+    # a COCO detector calls everyone a player, and it is the flag that names
+    # the restart.
+    dets = [person(200, 130), person(230, 150), person(260, 140), person(210, 160)]
+    dets.append(person(50, 170))                                           # the taker
+    dets.append(Detection("corner_flag", 28, 120, 34, 172, 0.9))           # a thin pole, feet off any grass test
+    if k < 9:
+        dets.append(ball(42, 172))
+    else:
+        dets.append(ball(42 + 28 * (k - 8), 172 - 9 * (k - 8)))
+    return dets
+
+
+def test_a_detected_flag_passes_detection_is_tracked_and_names_the_corner(tmp_path, clip):
+    ctx = _ctx(tmp_path, clip, detector=ScriptedDetector(corner_scene))
+    STAGES["s0_ingest"].run(ctx)
+    STAGES["s1_sampling"].run(ctx)
+    s2 = STAGES["s2_detection"].run(ctx)
+    dets = ctx.artifacts.read_table(s2, "detections.parquet").to_pylist()
+    assert sum(1 for d in dets if d["cls"] == "corner_flag") == 15, "the surface filter must not judge a landmark's feet"
+    s3 = STAGES["s3_tracking"].run(ctx)
+    frags = ctx.artifacts.read_table(s3, "fragments.parquet").to_pylist()
+    flag_tracks = {r["track_id"] for r in frags if r["cls"] == "corner_flag"}
+    assert len(flag_tracks) == 1 and sum(1 for r in frags if r["cls"] == "corner_flag") == 15
+    s8 = STAGES["s8_events"].run(ctx)
+    ev = ctx.artifacts.read_table(s8, "events.parquet").to_pylist()
+    assert [e["type"] for e in ev] == ["corner"] and ev[0]["confidence"] >= 0.8
+    log = json.loads(ctx.blobs.get(s8.key("dead_balls.json")))
+    assert log[0]["landmarks_h"]["corner_flag"] < 1.5 and not log[0]["roles_known"]
+    assert ctx.artifacts.read_manifest(s8)["config"]["landmark_classes"] == ["goal", "corner_flag"]
