@@ -107,8 +107,16 @@ def _overlay(args: argparse.Namespace) -> int:
 
 
 def _serve(args: argparse.Namespace) -> int:
+    import os
+
     import uvicorn
 
+    # The API reads its settings from the environment when it imports, so
+    # `--data` goes there: the same local directory `sideline ingest` wrote,
+    # which is how a run on one machine is reviewed from a phone on the
+    # same network with no services.
+    if args.data:
+        os.environ["SIDELINE_DATA_DIR"] = args.data
     uvicorn.run("sideline.api.app:app", host=args.host, port=args.port, reload=False)
     return 0
 
@@ -171,9 +179,10 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--sport", default=None, help="default: the match's own sport from its record")
     o.set_defaults(fn=_overlay)
 
-    v = sub.add_parser("serve", help="run the API")
+    v = sub.add_parser("serve", help="run the API and the review page, for this network only")
     v.add_argument("--host", default="0.0.0.0")
     v.add_argument("--port", type=int, default=8000)
+    v.add_argument("--data", default=None, help="a local data directory from `sideline ingest`, instead of the services")
     v.set_defaults(fn=_serve)
 
     w = sub.add_parser("worker", help="run an RQ worker")

@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY sideline ./sideline
+COPY web ./web
 RUN pip install --no-cache-dir ".[service]"
 
 ENV SIDELINE_DATA_DIR=/data

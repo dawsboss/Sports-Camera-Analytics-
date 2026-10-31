@@ -70,10 +70,29 @@ The first writes `detections.parquet`, `fragments.parquet` and
 `events.parquet` (throw-ins, corners, goal kicks, free kicks, kick-offs,
 keeper claims, each with the taker's track), plus `events.csv`, the same
 rows as a coach would write them down: match clock, event, who, how sure.
-`sideline log <id>` prints that list. The eval script scores the events
-against the corners, throw-ins and goal kicks the coach tapped in the
-minutes app. `docs/NEXT.md`, "Restarts without registration", says why
-this needs no pitch coordinates and what it still needs.
+`sideline log <id>` prints that list and `sideline overlay <id>` renders
+it onto the frames. The eval script scores the events against the
+corners, throw-ins and goal kicks the coach tapped in the minutes app.
+`docs/NEXT.md`, "Restarts without registration", says why this needs no
+pitch coordinates and what it still needs.
+
+## Review, on your own network
+
+```
+sideline serve --data ./data          # the same directory `sideline ingest` wrote
+```
+
+Then open `http://<that machine>:8000/review?match=<id>` from any browser
+on the same network, phone included. The page plays the match at each
+event the pipeline wrote, draws the taker, the ball and every tracked
+box, and takes one of four taps: right; wrong kind; wrong taker, by
+tapping the right player; not an event. With a roster uploaded it also
+names the taker. Each tap is a row in the database (`event_decisions`,
+`review_decisions`), never an edit to an artifact, and
+`GET /matches/<id>/review/decisions` exports them. The frames the page
+shows are served by this API to browsers on this network and nowhere
+else: keep the API on the LAN or a Tailscale network, never on the open
+internet. The compose stack serves the same page at `:8000/review`.
 
 ## Layout
 
@@ -93,10 +112,12 @@ sideline/
   storage/            blob store (local or MinIO) and the versioned artifact layout
   db/                 matches, jobs, stage runs, review decisions
   stages/             s0_ingest, s1_sampling, s2_detection, s3_tracking, s8_events
-  api/                FastAPI
+  overlay.py          the sampled frames with tracks, the ball's path and each event's call, as an MP4
+  api/                FastAPI: uploads, artifacts, and the review page's routes
   worker/             RQ worker
   spike.py, cli.py    the M1 spike and the `sideline` command
 docs/SPEC.md          the design, copied from the living doc
+web/                  the tagger (GitHub Pages) and review.html (served by the API on your network)
 hardware/             the static rig (M9): what to buy, the printed four-camera head or hidden pod, aim cards
 tests/                pytest; everything runs on a CPU with no services
 ```

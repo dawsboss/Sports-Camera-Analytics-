@@ -392,17 +392,26 @@ the questions a coach asks about a run.
   caption with the clock, the call, the taker and the reason;
   `--around 8` keeps only the seconds around events. `sideline log`
   prints the same list. Neither exists in a browser yet.
-- *Can I steer it?* Not yet. The piece that would is M6's review UI,
-  scoped to events first: play the match at each event (the tagger
-  already plays the Veo cut from its CDN with no backend), draw the taker
-  and the ball, and take one of four taps: right; wrong kind, pick the
-  kind; wrong taker, tap the right box; not an event. Each tap is a row
-  (a `ReviewDecision` on the event's track, or an event correction beside
-  it), never an edit to the artifact. Those rows do two things: they
-  score the rules per kind alongside the taps, and they accumulate into
-  the labelled set a learned classifier would train on. That page is the
-  next build after the first real run, because the first real run is
-  what says which corrections are common.
+- *Can I steer it?* Yes, from the start, at the owner's call: M6's review
+  UI exists, scoped to events. `web/review.html` is served by the API at
+  `/review?match=<id>` and plays the match at each event from S1's cached
+  frames, draws the taker, the ball and every tracked box from S3, and
+  takes one of four taps: right; wrong kind, pick the kind; wrong taker,
+  tap the right box; not an event. With a roster it names the taker. Each
+  tap is a row (`EventDecision`, keyed by the events version and the
+  event's time; `ReviewDecision` for a track's name), never an edit to the
+  artifact, and `GET /matches/<id>/review/decisions` exports them. Those
+  rows do two things: they score the rules per kind alongside the minutes
+  app's taps (`restarts_on_taps.py` should read them next), and they
+  accumulate into the labelled set a learned classifier would train on.
+- *Where does it run?* On your own network, which is what the spec always
+  said: compute on the homelab, the UI reaching it over the LAN or
+  Tailscale, raw video and frames never leaving. The tagger could live on
+  GitHub Pages because it needs only Veo's CDN; the review page needs the
+  pipeline's own frames and boxes, so it is served by the pipeline.
+  `sideline serve --data ./data` on the machine that ran the match is
+  enough; a phone on the same wifi opens the page. Never expose the API to
+  the open internet: it serves frames.
 
 **The flag and the net.** The coach's own cue for corner against goal
 kick is the right one: a ball by the corner flag is a corner, a ball in

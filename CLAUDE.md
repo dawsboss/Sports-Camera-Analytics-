@@ -185,11 +185,20 @@ what surrounded it in heights of the taker, never in metres or pixels.
   pitch coordinates is a long aerial ball ending near the goal landmark;
   it needs the ball held through flight, which is the blackout tail, and
   the goal detector above. `sideline overlay` renders what the stages saw
-  so a run can be watched; there is no review page yet to correct it.
-- No S4 team assignment, S6 identity, S7 review, S8 stats or S9 publish.
-  `contracts.py` already defines what they write. Events carry the taker
-  as a `track_id`; the name arrives as a review decision or from S6, and
-  the minutes app's attributed taps are a free labelled set for S6.
+  so a run can be watched.
+- **The review page is for events only and the verdicts are not read back
+  yet.** `web/review.html`, served by the API at `/review`, writes
+  `EventDecision` rows (right / wrong kind / wrong taker / not an event)
+  and `ReviewDecision` rows for a track's name. Nothing consumes them: the
+  scorer still reads only the minutes app's taps, S6 does not exist, and
+  a new events version starts with no verdicts. Replaying them by time
+  onto a new version, and scoring against them, is the next step. The
+  API serves S1's frames to browsers; it is for the LAN or Tailscale only.
+- No S4 team assignment, S6 identity, S8 stats or S9 publish; S7 review
+  exists for events only. `contracts.py` already defines what they write.
+  Events carry the taker as a `track_id`; the name arrives as a review
+  decision (the page's "Name the taker") or from S6, and the minutes
+  app's attributed taps are a free labelled set for S6.
 - Where `player_stats.json` sits under the fixture in soccer-manager's
   schema is undecided; that is a schema change on the other repo and is
   high-stakes there. Do not pick a path unilaterally.
