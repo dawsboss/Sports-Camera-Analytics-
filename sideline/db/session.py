@@ -31,7 +31,9 @@ def add_missing_columns(engine: Engine) -> list[str]:
     the only schema changes so far add columns; this adds any the models
     have and the database lacks, nullable, and returns their names. A
     column that must not be null is added without that constraint, which
-    old rows could not satisfy anyway."""
+    old rows could not satisfy anyway; where the model gives a plain
+    default (a number, a string), old rows take it, so a match made before
+    `pitch_length` existed reads 105 and not None."""
     insp = inspect(engine)
     added: list[str] = []
     with engine.begin() as conn:
@@ -42,8 +44,10 @@ def add_missing_columns(engine: Engine) -> list[str]:
             for col in table.columns:
                 if col.name in have:
                     continue
-                ddl = f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type.compile(engine.dialect)}'
-                conn.execute(text(ddl))
+                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type.compile(engine.dialect)}'))
+                default = col.default.arg if col.default is not None and col.default.is_scalar else None
+                if isinstance(default, (int, float, str, bool)):
+                    conn.execute(text(f"UPDATE {table.name} SET {col.name} = :v WHERE {col.name} IS NULL"), {"v": default})
                 added.append(f"{table.name}.{col.name}")
     return added
 

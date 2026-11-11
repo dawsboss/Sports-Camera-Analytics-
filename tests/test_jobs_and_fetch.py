@@ -38,12 +38,14 @@ def served_clip(clip):
 def test_a_linked_video_is_fetched_then_ingested_inline(tmp_path, served_clip):
     settings = Settings(data_dir=tmp_path / "data", inline_jobs=True)
     with TestClient(create_app(settings)) as c:
-        r = c.post("/matches", data={"video_url": served_clip, "kickoff_offset_ms": "500"})
+        r = c.post("/matches", data={"video_url": served_clip + "?token=secret", "kickoff_offset_ms": "500"})
         assert r.status_code == 201, r.text
         m = r.json()
         assert [j["stage"] for j in m["jobs"]] == ["fetch", "s0_ingest", "s1_sampling"]
         assert all(j["status"] == "done" for j in m["jobs"]) and m["jobs"][0]["artifact_version"] is None
+        # The link is shown without its query: a signed token stays on the server.
         assert m["source_url"] == served_clip and m["original_filename"] == "clip.mp4" and m["artifacts"]["s1_sampling"] == [1]
+        assert not list((tmp_path / "data" / "work").glob("tmp*")), "the fetch left a spool directory behind"
         # The source landed in the blob store under the match.
         with session_scope(build_engine(settings)) as s:
             key = s.get(Match, m["id"]).source_key
@@ -72,6 +74,47 @@ def test_fetch_refuses_a_web_page_in_place_of_a_video(tmp_path, clip, served_cli
         mid = m.id
     with pytest.raises(ValueError, match="not a video"):
         fetch_source(settings, mid)
+    assert not list((tmp_path / "data" / "work").glob("tmp*")), "a failed fetch left its spool behind"
+
+
+def test_fetch_follows_redirects_only_on_http(tmp_path, clip):
+    class Redirecting(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            target = "ftp://127.0.0.1/clip.mp4" if self.path == "/away" else f"http://127.0.0.1:{self.server.server_address[1]}/clip.mp4"
+            if self.path in ("/away", "/hop"):
+                self.send_response(302)
+                self.send_header("Location", target)
+                self.end_headers()
+                return
+            data = clip.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Redirecting)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    settings = Settings(data_dir=tmp_path / "data", inline_jobs=True)
+    try:
+        with session_scope(build_engine(settings)) as s:
+            a = Match(capture_mode="followcam", source_key="", source_url=f"{base}/hop")
+            b = Match(capture_mode="followcam", source_key="", source_url=f"{base}/away")
+            s.add_all([a, b])
+            s.flush()
+            ida, idb = a.id, b.id
+        # The file is named from the link the coach typed, redirects or not.
+        assert fetch_source(settings, ida) == f"matches/{ida}/source/hop.mp4"
+        with pytest.raises(ValueError, match="off http"):
+            fetch_source(settings, idb)
+        # Fetching again after the blob landed only writes the record.
+        assert fetch_source(settings, ida) == f"matches/{ida}/source/hop.mp4"
+    finally:
+        srv.shutdown()
 
 
 def test_uploads_return_while_the_thread_runs_the_stages(tmp_path, clip):
@@ -122,6 +165,7 @@ def test_a_database_from_before_a_column_gains_it_on_start(tmp_path):
         conn.execute(text("CREATE TABLE matches (id VARCHAR(32) PRIMARY KEY, capture_mode VARCHAR(16), source_key VARCHAR(512))"))
         conn.execute(text("CREATE TABLE event_decisions (id VARCHAR(32) PRIMARY KEY, match_id VARCHAR(32), events_version INTEGER, "
                           "t_ms INTEGER, verdict VARCHAR(16), decided_by VARCHAR(128))"))
+        conn.execute(text("INSERT INTO matches (id, capture_mode, source_key) VALUES ('old1', 'followcam', '')"))
     eng.dispose()
     settings = Settings(data_dir=tmp_path, db_url=url)
     engine = build_engine(settings)
@@ -130,4 +174,7 @@ def test_a_database_from_before_a_column_gains_it_on_start(tmp_path):
     assert "tracks_version" in {c["name"] for c in inspect(engine).get_columns("event_decisions")}
     assert add_missing_columns(engine) == []          # a second start adds nothing
     with session_scope(engine) as s:
+        old = s.get(Match, "old1")
+        # Old rows take the model's plain defaults rather than reading None.
+        assert old.pitch_length == 105.0 and old.pitch_width == 68.0 and old.sport == "soccer" and old.source_url is None
         s.add(Match(capture_mode="followcam", source_key="", source_url="http://x/y.mp4"))

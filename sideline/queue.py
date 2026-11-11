@@ -57,13 +57,19 @@ class ThreadQueue:
     def __init__(self, settings) -> None:
         self.settings = settings
         self.pending: "_queue.Queue[str]" = _queue.Queue()
+        self._lock = threading.Lock()
+        self._outstanding = 0
         self.done = threading.Event()
         self.done.set()
         self.thread = threading.Thread(target=self._work, name="sideline-jobs", daemon=True)
         self.thread.start()
 
     def enqueue(self, job_id: str, depends_on: Optional[str] = None) -> str:
-        self.done.clear()
+        # `depends_on` is implicit: one thread, first in first out, so a
+        # stage never starts before the one queued ahead of it has finished.
+        with self._lock:
+            self._outstanding += 1
+            self.done.clear()
         self.pending.put(job_id)
         return job_id
 
@@ -78,8 +84,10 @@ class ThreadQueue:
                 log.exception("job %s failed", job_id)
             finally:
                 self.pending.task_done()
-                if self.pending.empty():
-                    self.done.set()
+                with self._lock:
+                    self._outstanding -= 1
+                    if self._outstanding == 0:
+                        self.done.set()
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         """Block until the queue has drained; for tests and shutdown."""

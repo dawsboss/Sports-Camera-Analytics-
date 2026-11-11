@@ -123,7 +123,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def _match_out(m: Match, store: ArtifactStore) -> MatchOut:
         return MatchOut(
             id=m.id, sm_match_id=m.sm_match_id, capture_mode=m.capture_mode, sport=m.sport,
-            original_filename=m.original_filename, source_url=m.source_url,
+            # A signed CDN link carries its token in the query; the browser
+            # needs only where the film came from, not the right to fetch it.
+            original_filename=m.original_filename, source_url=m.source_url.split("?")[0] if m.source_url else None,
             created_at=m.created_at.isoformat() if m.created_at else None,
             pitch_length=m.pitch_length, pitch_width=m.pitch_width,
             kickoff_offset_ms=m.kickoff_offset_ms,

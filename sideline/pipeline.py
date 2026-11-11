@@ -57,11 +57,12 @@ def fetch_source(settings: Settings, match_id: str) -> str:
     import urllib.request
 
     engine = build_engine(settings)
+    blobs = build_blobs(settings)
     with session_scope(engine) as s:
         m = s.get(Match, match_id)
         if m is None:
             raise KeyError(match_id)
-        if m.source_key and build_blobs(settings).exists(m.source_key):
+        if m.source_key and blobs.exists(m.source_key):
             return m.source_key
         url = m.source_url
     if not url:
@@ -72,33 +73,52 @@ def fetch_source(settings: Settings, match_id: str) -> str:
     name = Path(urllib.parse.unquote(parts.path)).name or "match.mp4"
     if "." not in name:
         name += ".mp4"
-    tmpdir = Path(tempfile.mkdtemp(dir=settings.workdir))
-    tmp = tmpdir / name
-    req = urllib.request.Request(url, headers={"User-Agent": "sideline/0.1"})
-    with urllib.request.urlopen(req, timeout=60) as resp, tmp.open("wb") as out:
-        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        if ctype and not (ctype.startswith("video/") or ctype in ("application/octet-stream", "binary/octet-stream")):
-            raise ValueError(f"{url} serves {ctype}, not a video; the link must be to the file itself")
-        total = 0
-        while True:
-            chunk = resp.read(8 * 1024 * 1024)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > MAX_FETCH_BYTES:
-                raise ValueError("the file is larger than the fetch limit")
-            out.write(chunk)
-    if total == 0:
-        raise ValueError(f"{url} returned an empty file")
-    blobs = build_blobs(settings)
     key = f"matches/{match_id}/source/{name}"
-    blobs.put_file(key, tmp, "video/mp4")
-    shutil.rmtree(tmpdir, ignore_errors=True)
+    if not blobs.exists(key):
+        # A retry after the download landed but the record did not: the blob
+        # is there, immutable, and only the record needs writing.
+        tmpdir = Path(tempfile.mkdtemp(dir=settings.workdir))
+        try:
+            tmp = tmpdir / name
+            req = urllib.request.Request(url, headers={"User-Agent": "sideline/0.1"})
+            with _http_only_opener().open(req, timeout=60) as resp, tmp.open("wb") as out:
+                ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if ctype and not (ctype.startswith("video/") or ctype in ("application/octet-stream", "binary/octet-stream")):
+                    raise ValueError(f"{url} serves {ctype}, not a video; the link must be to the file itself")
+                total = 0
+                while True:
+                    chunk = resp.read(8 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_FETCH_BYTES:
+                        raise ValueError("the file is larger than the fetch limit")
+                    out.write(chunk)
+            if total == 0:
+                raise ValueError(f"{url} returned an empty file")
+            blobs.put_file(key, tmp, "video/mp4")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
     with session_scope(engine) as s:
         m = s.get(Match, match_id)
         m.source_key = key
         m.original_filename = m.original_filename or name
     return key
+
+
+def _http_only_opener():
+    """urllib follows a redirect to any scheme its handlers know, ftp and
+    file-like ones included; a fetch that was asked for an http(s) link
+    stays on http(s) through every hop."""
+    import urllib.request
+
+    class _Redirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if not (newurl.startswith("http://") or newurl.startswith("https://")):
+                raise ValueError(f"refusing a redirect off http(s): {newurl}")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    return urllib.request.build_opener(_Redirects)
 
 
 def run_job(settings: Settings, job_id: str) -> Optional[ArtifactRef]:
@@ -135,8 +155,9 @@ def run_job(settings: Settings, job_id: str) -> Optional[ArtifactRef]:
 
 
 def run_stages(settings: Settings, match_id: str, stages: list[str], config: Optional[dict] = None) -> list[ArtifactRef]:
-    """Run stages on a match that already exists, inline, and record them:
-    how a GPU machine runs detection on a match another machine ingested."""
+    """Run stages on a match that already exists, inline; each run is a
+    `StageRun` row as usual. How a GPU machine runs detection on a match
+    another machine ingested."""
     engine = build_engine(settings)
     with session_scope(engine) as s:
         m = s.get(Match, match_id)
