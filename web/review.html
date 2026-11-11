@@ -28,7 +28,7 @@
   .list { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
   .list header { padding: 14px 14px 8px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .list header small { color: var(--muted); font-weight: 400; }
-  .ev { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; padding: 9px 14px; border-top: 1px solid var(--line); cursor: pointer; align-items: center; }
+  .ev { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; padding: 9px 14px; border-top: 1px solid var(--line); cursor: pointer; align-items: center; color: inherit; text-decoration: none; }
   .ev:hover { background: var(--raised); }
   .ev.sel { background: var(--raised); box-shadow: inset 3px 0 var(--flag); }
   .ev .clock { font-family: var(--mono); color: var(--muted); }
@@ -119,7 +119,22 @@
     $('empty').hidden = false; $('empty').textContent = msg;
   }
   if (!matchId) {
-    fail('Open this page from the Sideline API on your network as /review?match=<match id>. `sideline serve --data ./data` after a run, then the match id `sideline ingest` printed.');
+    // No match named: list the ones this API knows, newest first, so the
+    // page is reachable from a bookmark without remembering an id.
+    api('/matches').then(list => {
+      const el = $('events'); el.innerHTML = '';
+      $('count').textContent = `${list.length} match${list.length === 1 ? '' : 'es'}`;
+      $('matchid').textContent = '';
+      if (!list.length) { fail('No matches on this server yet. Process one with `sideline ingest` and copy its data directory here.'); return; }
+      for (const m of list) {
+        const a = document.createElement('a');
+        a.className = 'ev'; a.href = `/review?match=${encodeURIComponent(m.id)}`;
+        const events = (m.artifacts && m.artifacts.s8_events && m.artifacts.s8_events.length) ? `events v${Math.max(...m.artifacts.s8_events)}` : 'no events yet';
+        a.innerHTML = `<span class="clock">${esc(m.id.slice(0, 6))}</span><span><div class="kind">${esc(m.original_filename || m.id)}</div><div class="who">${esc(m.capture_mode)} · ${esc(events)}</div></span><span class="badge">open</span>`;
+        el.appendChild(a);
+      }
+      $('empty').hidden = false; $('empty').textContent = 'Pick a match on the left.';
+    }).catch(err => fail(`Could not list matches: ${err.message}. Is this page served by the Sideline API (sideline serve) on your network?`));
     return;
   }
 
