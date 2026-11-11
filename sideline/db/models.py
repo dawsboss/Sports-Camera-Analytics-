@@ -37,6 +37,9 @@ class Match(Base):
     sport: Mapped[str] = mapped_column(String(32), default="soccer")
     capture_mode: Mapped[str] = mapped_column(String(16))
     source_key: Mapped[str] = mapped_column(String(512))
+    # Where the video came from when it was fetched rather than uploaded:
+    # a direct link to the file. Empty source_key until the fetch job lands it.
+    source_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     original_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     pitch_length: Mapped[float] = mapped_column(Float, default=105.0)
     pitch_width: Mapped[float] = mapped_column(Float, default=68.0)

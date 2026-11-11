@@ -4,7 +4,7 @@
 // pytest (tests/test_review_api.py covers the routes); run it by hand:
 //
 //   sideline serve --data <dir with a reviewed match> --port 8765 &
-//   node web/review.smoke.js http://localhost:8765 <match id>
+//   node web/review.smoke.js http://localhost:8765 <match id> [a clip to add through the form]
 const { chromium } = require('playwright');
 
 (async () => {
@@ -15,12 +15,23 @@ const { chromium } = require('playwright');
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-  // Without a match the page lists the matches this API knows.
+  // Without a match the page lists the matches this API knows, and takes film.
   await page.goto(`${base}/review`);
   await page.waitForSelector('a.ev');
   const links = await page.$$eval('a.ev', els => els.map(e => e.getAttribute('href')));
   if (!links.some(h => h.includes(matchId))) throw new Error(`match list lacks ${matchId}: ${links}`);
   console.log('match list:', links.length, 'link(s)');
+  const clipPath = process.argv[4];
+  if (clipPath) {
+    await page.setInputFiles('#f_file', clipPath);
+    await page.fill('#f_kick', '0:01');
+    await page.click('#f_go');
+    // The upload returns at once; the list then shows the stages running and finally sampled.
+    await page.waitForFunction(() => document.querySelectorAll('a.ev').length >= 2, null, { timeout: 15000 });
+    await page.waitForFunction(() => [...document.querySelectorAll('.status')].some(s => /needs detection|ready to review/.test(s.textContent)), null, { timeout: 60000 });
+    const statuses = await page.$$eval('.status', els => els.map(e => e.textContent));
+    console.log('after adding film:', JSON.stringify(statuses));
+  }
   await page.goto(`${base}/review?match=${matchId}`);
   await page.waitForSelector('.ev');
   const rows = await page.$$eval('.ev', els => els.map(e => e.textContent));

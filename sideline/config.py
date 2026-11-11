@@ -25,6 +25,11 @@ class Settings:
     minio_secure: bool = False
     redis_url: Optional[str] = None
     inline_jobs: bool = True
+    # inline | thread | rq. Inline runs a job before the request returns,
+    # which tests want; thread runs it in the background of the API's own
+    # process, which one machine serving a household wants; rq is the
+    # compose stack. Empty means: rq with Redis, else inline.
+    job_runner: str = ""
     sample_fps: float = 5.0
     cache_frames: bool = True
     pipeline_version: str = "0.1.0"
@@ -45,6 +50,7 @@ class Settings:
             minio_secure=env("SIDELINE_MINIO_SECURE", "0") == "1",
             redis_url=redis_url,
             inline_jobs=env("SIDELINE_INLINE_JOBS", "1" if not redis_url else "0") == "1",
+            job_runner=env("SIDELINE_JOB_RUNNER", ""),
             sample_fps=float(env("SIDELINE_SAMPLE_FPS", "5")),
             cache_frames=env("SIDELINE_CACHE_FRAMES", "1") == "1",
         )
@@ -89,9 +95,20 @@ def build_engine(settings: Settings):
     return _ENGINES[url]
 
 
-def build_queue(settings: Settings):
-    from sideline.queue import InlineQueue, RQQueue
+_THREAD_QUEUES: dict[str, object] = {}
 
-    if settings.inline_jobs or not settings.redis_url:
-        return InlineQueue(settings)
-    return RQQueue(settings.redis_url)
+
+def build_queue(settings: Settings):
+    from sideline.queue import InlineQueue, RQQueue, ThreadQueue
+
+    runner = settings.job_runner or ("rq" if settings.redis_url and not settings.inline_jobs else "inline")
+    if runner == "thread":
+        key = str(settings.data_dir.resolve())
+        if key not in _THREAD_QUEUES:
+            _THREAD_QUEUES[key] = ThreadQueue(settings)
+        return _THREAD_QUEUES[key]
+    if runner == "rq":
+        if not settings.redis_url:
+            raise ValueError("job_runner rq needs SIDELINE_REDIS_URL")
+        return RQQueue(settings.redis_url)
+    return InlineQueue(settings)

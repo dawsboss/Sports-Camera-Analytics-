@@ -46,6 +46,23 @@ def _ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run(args: argparse.Namespace) -> int:
+    """Run stages on a match that exists already: the GPU machine's half of
+    a match the homelab ingested."""
+    from sideline.config import Settings
+    from sideline.pipeline import run_stages
+
+    settings = Settings.from_env(data_dir=Path(args.data))
+    config: dict = {"grass_filter": not args.no_grass_filter}
+    if args.max_frames is not None:
+        config["max_frames"] = args.max_frames
+    if args.weights:
+        config["detectors"] = [{"weights": w, "imgsz": args.imgsz} for w in args.weights]
+    for ref in run_stages(settings, args.match_id, args.stages.split(","), config):
+        print(f"{ref.stage} v{ref.version}")
+    return 0
+
+
 def _log(args: argparse.Namespace) -> int:
     """Print the match's events as a coach would write them down."""
     from sideline.config import Settings, build_blobs
@@ -117,6 +134,9 @@ def _serve(args: argparse.Namespace) -> int:
     # same network with no services.
     if args.data:
         os.environ["SIDELINE_DATA_DIR"] = args.data
+    # One machine, no Redis: uploads return at once and the stages run on a
+    # background thread of this process. Redis, when configured, still wins.
+    os.environ.setdefault("SIDELINE_JOB_RUNNER", "rq" if os.environ.get("SIDELINE_REDIS_URL") else "thread")
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print("serving the review page and sampled frames to every device on this network; "
               "keep this port off the internet (no public tunnel), or bind --host 127.0.0.1", file=sys.stderr)
@@ -165,6 +185,16 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--max-frames", type=int, default=None,
                    help="sample and detect only this many frames, for a quick run on a slice of the match")
     i.set_defaults(fn=_ingest)
+
+    r = sub.add_parser("run", help="run stages on an existing match, e.g. detection on a GPU machine")
+    r.add_argument("match_id")
+    r.add_argument("--data", default="./data")
+    r.add_argument("--stages", default="s2_detection,s3_tracking,s8_events")
+    r.add_argument("--weights", action="append", default=None, help="detector checkpoint(s); default yolo11x.pt")
+    r.add_argument("--imgsz", type=int, default=1920)
+    r.add_argument("--no-grass-filter", action="store_true")
+    r.add_argument("--max-frames", type=int, default=None)
+    r.set_defaults(fn=_run)
 
     g = sub.add_parser("log", help="print a match's events: the clock, what happened, who, how sure")
     g.add_argument("match_id")

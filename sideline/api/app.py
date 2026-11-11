@@ -25,7 +25,7 @@ from sideline import __version__
 from sideline.config import Settings, build_blobs, build_engine
 from sideline.db.models import EventDecision, Job, Match, ReviewDecision, StageRun
 from sideline.db.session import session_scope
-from sideline.pipeline import enqueue_stages
+from sideline.pipeline import FETCH, enqueue_stages
 from sideline.sports import get_sport
 from sideline.stages import DEFAULT_STAGES, ORDER
 from sideline.stages.s8_events import clock
@@ -91,6 +91,8 @@ class MatchOut(BaseModel):
     capture_mode: str
     sport: str
     original_filename: Optional[str]
+    source_url: Optional[str] = None
+    created_at: Optional[str] = None
     pitch_length: float
     pitch_width: float
     kickoff_offset_ms: Optional[int]
@@ -121,7 +123,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def _match_out(m: Match, store: ArtifactStore) -> MatchOut:
         return MatchOut(
             id=m.id, sm_match_id=m.sm_match_id, capture_mode=m.capture_mode, sport=m.sport,
-            original_filename=m.original_filename, pitch_length=m.pitch_length, pitch_width=m.pitch_width,
+            original_filename=m.original_filename, source_url=m.source_url,
+            created_at=m.created_at.isoformat() if m.created_at else None,
+            pitch_length=m.pitch_length, pitch_width=m.pitch_width,
             kickoff_offset_ms=m.kickoff_offset_ms,
             jobs=[JobOut(id=j.id, stage=j.stage, status=j.status, error=j.error, artifact_version=j.artifact_version)
                   for j in sorted(m.jobs, key=lambda j: j.created_at)],
@@ -135,7 +139,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/matches", response_model=MatchOut, status_code=201)
     async def create_match(
         request: Request,
-        file: UploadFile = File(...),
+        file: Optional[UploadFile] = File(None),
+        video_url: Optional[str] = Form(None),
         capture_mode: str = Form("followcam"),
         sm_match_id: Optional[str] = Form(None),
         pitch_length: float = Form(105.0),
@@ -149,14 +154,22 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> MatchOut:
         if capture_mode not in ("static", "followcam"):
             raise HTTPException(422, "capture_mode must be static or followcam")
+        has_file = file is not None and bool(file.filename)
+        link = (video_url or "").strip()
+        if has_file == bool(link):
+            raise HTTPException(422, "send either a video file or a direct link to one, not both and not neither")
+        if link and not (link.startswith("http://") or link.startswith("https://")):
+            raise HTTPException(422, "video_url must be an http(s) link to the video file itself")
         # No `stages` means the default ones (ingest and sampling; detection
         # is asked for by name because it wants a model and a GPU); `run=false`
         # registers the match and queues nothing, for a re-run later or a
-        # stage started by hand.
+        # stage started by hand. A linked video is fetched by a job before S0.
         wanted = [s for s in (stages or ",".join(DEFAULT_STAGES)).split(",") if s] if run else []
         unknown = [s for s in wanted if s not in ORDER]
         if unknown:
             raise HTTPException(422, f"unknown stages {unknown}; known: {ORDER}")
+        if link and wanted:
+            wanted = [FETCH] + wanted
 
         def _json(name: str, text: Optional[str]) -> Optional[dict]:
             if text is None or text == "":
@@ -168,22 +181,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         st: Settings = request.app.state.settings
         store: ArtifactStore = request.app.state.artifacts
-        filename = Path(file.filename or "upload.mp4").name
-        # Spool to disk first: a match is gigabytes, and the blob store wants a
-        # file it can stream, not a body held in memory.
-        tmp = Path(tempfile.mkdtemp(dir=st.workdir)) / filename
-        with tmp.open("wb") as out:
-            shutil.copyfileobj(file.file, out, length=8 * 1024 * 1024)
+        if has_file:
+            filename = Path(file.filename or "upload.mp4").name
+            # Spool to disk first: a match is gigabytes, and the blob store wants a
+            # file it can stream, not a body held in memory.
+            tmp = Path(tempfile.mkdtemp(dir=st.workdir)) / filename
+            with tmp.open("wb") as out:
+                shutil.copyfileobj(file.file, out, length=8 * 1024 * 1024)
+        else:
+            filename = Path(link.split("?")[0].rstrip("/")).name or "match.mp4"
+            tmp = None
         with session_scope(request.app.state.engine) as s:
             m = Match(sm_match_id=sm_match_id, capture_mode=capture_mode, source_key="", original_filename=filename,
+                      source_url=link or None,
                       pitch_length=pitch_length, pitch_width=pitch_width, kickoff_offset_ms=kickoff_offset_ms,
                       roster=_json("roster", roster), stints=_json("stints", stints), periods=_json("periods", periods))
             s.add(m)
             s.flush()
-            m.source_key = f"matches/{m.id}/source/{filename}"
-            request.app.state.blobs.put_file(m.source_key, tmp, file.content_type or "video/mp4")
+            if tmp is not None:
+                m.source_key = f"matches/{m.id}/source/{filename}"
+                request.app.state.blobs.put_file(m.source_key, tmp, file.content_type or "video/mp4")
             match_id = m.id
-        shutil.rmtree(tmp.parent, ignore_errors=True)
+        if tmp is not None:
+            shutil.rmtree(tmp.parent, ignore_errors=True)
         if wanted:
             enqueue_stages(st, match_id, wanted)
         with session_scope(request.app.state.engine) as s:

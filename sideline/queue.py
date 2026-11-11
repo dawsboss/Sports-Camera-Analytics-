@@ -1,9 +1,15 @@
-"""The job queue: Redis with RQ in the homelab, or the same jobs run inline
-for tests and for a laptop with no Redis."""
+"""The job queue: Redis with RQ on the compose stack, a background thread
+for one machine serving the API with no Redis, or the same jobs run inline
+for tests and a terminal."""
 
 from __future__ import annotations
 
+import logging
+import queue as _queue
+import threading
 from typing import Optional, Protocol
+
+log = logging.getLogger(__name__)
 
 
 class JobQueue(Protocol):
@@ -38,3 +44,43 @@ class RQQueue:
 
         job = self.queue.enqueue(run_job_by_id, job_id, depends_on=depends_on, job_id=f"sideline:{job_id}")
         return job.id
+
+
+class ThreadQueue:
+    """Jobs run one after another on a daemon thread in the API's own
+    process, so an upload returns at once and a full match transcodes in
+    the background. This is what `sideline serve` uses on a machine with no
+    Redis. One queue per process: jobs depend on the one before and must
+    not overtake it. A failure is recorded on the job by `run_job` and the
+    thread carries on with the next."""
+
+    def __init__(self, settings) -> None:
+        self.settings = settings
+        self.pending: "_queue.Queue[str]" = _queue.Queue()
+        self.done = threading.Event()
+        self.done.set()
+        self.thread = threading.Thread(target=self._work, name="sideline-jobs", daemon=True)
+        self.thread.start()
+
+    def enqueue(self, job_id: str, depends_on: Optional[str] = None) -> str:
+        self.done.clear()
+        self.pending.put(job_id)
+        return job_id
+
+    def _work(self) -> None:
+        from sideline.pipeline import run_job
+
+        while True:
+            job_id = self.pending.get()
+            try:
+                run_job(self.settings, job_id)
+            except Exception:                        # the job row carries the failure
+                log.exception("job %s failed", job_id)
+            finally:
+                self.pending.task_done()
+                if self.pending.empty():
+                    self.done.set()
+
+    def wait(self, timeout: Optional[float] = None) -> bool:
+        """Block until the queue has drained; for tests and shutdown."""
+        return self.done.wait(timeout)

@@ -53,6 +53,18 @@
   .verdicts .sp { flex: 1; }
   .verdicts .who { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
   .empty { padding: 40px; color: var(--muted); text-align: center; }
+  .add { padding: 14px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+  .add h3 { font-size: 15px; }
+  .add label { display: grid; gap: 3px; font-size: 13px; color: var(--muted); }
+  .add input, .add select { width: 100%; }
+  .add .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .add .check { display: flex; gap: 8px; align-items: flex-start; color: var(--chalk); }
+  .add .check input { width: auto; margin-top: 3px; }
+  .add progress { width: 100%; height: 8px; }
+  .add .err { color: var(--bad); font-size: 13px; }
+  .status { font-size: 12px; color: var(--muted); }
+  .status.failed { color: var(--bad); }
+  .status.ready { color: var(--ok); }
   kbd { font-family: var(--mono); font-size: 12px; background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--muted); }
 </style>
 </head>
@@ -62,6 +74,24 @@
     <header><span>Events <small id="count"></small></span><small id="matchid"></small></header>
     <div id="events"></div>
     <div id="empty" class="empty" hidden></div>
+    <form id="add" class="add" hidden>
+      <h3>Add film</h3>
+      <label>Video file<input type="file" id="f_file" accept="video/*"></label>
+      <label>or a direct link to the video file<input type="url" id="f_url" placeholder="https://…/match.mp4"></label>
+      <div class="two">
+        <label>First whistle, into the video<input type="text" id="f_kick" placeholder="mm:ss" pattern="^\d{1,3}:\d{2}$"></label>
+        <label>Camera<select id="f_mode"><option value="followcam">Veo follow-cam</option><option value="static">fixed camera</option></select></label>
+      </div>
+      <div class="two">
+        <label>Pitch length, m<input type="number" id="f_len" value="105" step="0.5" min="30"></label>
+        <label>Pitch width, m<input type="number" id="f_wid" value="68" step="0.5" min="20"></label>
+      </div>
+      <label>Minutes-app game id (optional)<input type="text" id="f_sm" placeholder="matches/… id"></label>
+      <label class="check"><input type="checkbox" id="f_detect"><span>Also find the players, the ball and the restarts here. Needs the detector model and takes hours without a GPU; leave off to do that step on the GPU machine.</span></label>
+      <button class="primary" id="f_go" type="submit">Add</button>
+      <progress id="f_prog" value="0" max="100" hidden></progress>
+      <div class="err" id="f_err" hidden></div>
+    </form>
   </aside>
   <main class="stage">
     <div class="frame">
@@ -119,22 +149,73 @@
     $('empty').hidden = false; $('empty').textContent = msg;
   }
   if (!matchId) {
-    // No match named: list the ones this API knows, newest first, so the
-    // page is reachable from a bookmark without remembering an id.
-    api('/matches').then(list => {
+    // No match named: the landing page. It lists the matches this API
+    // knows, newest first, with where each one has got to, and takes new
+    // film: a file, or a direct link the server fetches. The stages run in
+    // the background; the list polls while any job is still going.
+    const STAGE_WORDS = { fetch: 'fetching the video', s0_ingest: 'ingesting', s1_sampling: 'sampling frames',
+                          s2_detection: 'finding players and the ball', s3_tracking: 'tracking', s8_events: 'finding restarts' };
+    function statusOf(m) {
+      const jobs = m.jobs || [];
+      const failed = jobs.find(j => j.status === 'failed');
+      if (failed) return { cls: 'failed', text: `${STAGE_WORDS[failed.stage] || failed.stage} failed: ${(failed.error || '').slice(0, 120)}` };
+      const live = jobs.find(j => j.status === 'running') || jobs.find(j => j.status === 'queued');
+      if (live) return { cls: 'busy', text: `${STAGE_WORDS[live.stage] || live.stage}${live.status === 'queued' ? ' (queued)' : '…'}` };
+      const a = m.artifacts || {};
+      if (a.s8_events && a.s8_events.length) return { cls: 'ready', text: `ready to review · events v${Math.max(...a.s8_events)}` };
+      if (a.s1_sampling && a.s1_sampling.length) return { cls: '', text: 'sampled; needs detection on the GPU machine (sideline run)' };
+      return { cls: '', text: 'nothing run yet' };
+    }
+    let timer = null;
+    async function refresh() {
+      const list = await api('/matches');
       const el = $('events'); el.innerHTML = '';
       $('count').textContent = `${list.length} match${list.length === 1 ? '' : 'es'}`;
       $('matchid').textContent = '';
-      if (!list.length) { fail('No matches on this server yet. Process one with `sideline ingest` and copy its data directory here.'); return; }
+      $('add').hidden = false;
+      if (!list.length) { $('empty').hidden = false; $('empty').textContent = 'No matches on this server yet. Add film below.'; }
+      else { $('empty').hidden = false; $('empty').textContent = 'Pick a match on the left, or add film below.'; }
+      let busy = false;
       for (const m of list) {
+        const st = statusOf(m);
+        busy = busy || st.cls === 'busy';
         const a = document.createElement('a');
         a.className = 'ev'; a.href = `/review?match=${encodeURIComponent(m.id)}`;
-        const events = (m.artifacts && m.artifacts.s8_events && m.artifacts.s8_events.length) ? `events v${Math.max(...m.artifacts.s8_events)}` : 'no events yet';
-        a.innerHTML = `<span class="clock">${esc(m.id.slice(0, 6))}</span><span><div class="kind">${esc(m.original_filename || m.id)}</div><div class="who">${esc(m.capture_mode)} · ${esc(events)}</div></span><span class="badge">open</span>`;
+        a.innerHTML = `<span class="clock">${esc(m.id.slice(0, 6))}</span><span><div class="kind">${esc(m.original_filename || m.id)}</div><div class="status ${esc(st.cls)}">${esc(m.capture_mode)} · ${esc(st.text)}</div></span><span class="badge">${st.cls === 'ready' ? 'review' : 'open'}</span>`;
         el.appendChild(a);
       }
-      $('empty').hidden = false; $('empty').textContent = 'Pick a match on the left.';
-    }).catch(err => fail(`Could not list matches: ${err.message}. Is this page served by the Sideline API (sideline serve) on your network?`));
+      clearTimeout(timer);
+      if (busy) timer = setTimeout(() => refresh().catch(() => {}), 3000);
+    }
+    refresh().catch(err => fail(`Could not list matches: ${err.message}. Is this page served by the Sideline API (sideline serve) on your network?`));
+
+    $('add').addEventListener('submit', ev => {
+      ev.preventDefault();
+      const file = $('f_file').files[0], url = $('f_url').value.trim(), err = $('f_err');
+      err.hidden = true;
+      if (!file && !url) { err.hidden = false; err.textContent = 'Pick a video file or paste a direct link to one.'; return; }
+      if (file && url) { err.hidden = false; err.textContent = 'One or the other, not both.'; return; }
+      const fd = new FormData();
+      if (file) fd.append('file', file, file.name); else fd.append('video_url', url);
+      fd.append('capture_mode', $('f_mode').value);
+      fd.append('pitch_length', $('f_len').value || '105');
+      fd.append('pitch_width', $('f_wid').value || '68');
+      const kick = $('f_kick').value.trim();
+      if (kick) { const [mm, ss] = kick.split(':').map(Number); fd.append('kickoff_offset_ms', String((mm * 60 + ss) * 1000)); }
+      if ($('f_sm').value.trim()) fd.append('sm_match_id', $('f_sm').value.trim());
+      if ($('f_detect').checked) fd.append('stages', 's0_ingest,s1_sampling,s2_detection,s3_tracking,s8_events');
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/matches');
+      $('f_go').disabled = true; $('f_prog').hidden = false; $('f_prog').value = 0;
+      xhr.upload.onprogress = e => { if (e.lengthComputable) $('f_prog').value = Math.round(100 * e.loaded / e.total); };
+      xhr.onload = () => {
+        $('f_go').disabled = false; $('f_prog').hidden = true;
+        if (xhr.status === 201) { $('add').reset(); refresh().catch(() => {}); }
+        else { err.hidden = false; err.textContent = `The server refused it: ${xhr.status} ${xhr.responseText.slice(0, 200)}`; }
+      };
+      xhr.onerror = () => { $('f_go').disabled = false; $('f_prog').hidden = true; err.hidden = false; err.textContent = 'The upload failed before the server answered.'; };
+      xhr.send(fd);
+    });
     return;
   }
 

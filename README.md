@@ -82,8 +82,24 @@ pitch coordinates and what it still needs.
 sideline serve --data ./data          # the same directory `sideline ingest` wrote
 ```
 
-Then open `http://<that machine>:8000/review?match=<id>` from any browser
-on the same network, phone included. The page plays the match at each
+Then open `http://<that machine>:8000/review` from any browser on the
+same network, phone included. The landing page lists the matches with
+where each has got to, and takes new film: a video file, or a direct link
+to one that the server fetches (a Veo match page is not the file; the
+tagger's README says how to get the direct link). Ingest and sampling run
+in the background on the machine serving the page; detection needs the
+model and a GPU, so by default it is left for the GPU machine:
+
+```
+rsync -a sideline@<homelab>:/srv/sideline/data/ ./data/      # bring the match over
+sideline run <match id> --data ./data                        # detection, tracking, restarts
+rsync -a ./data/blobs/ sideline@<homelab>:/srv/sideline/data/blobs/   # send the artifacts back
+```
+
+Tick "also find the players, the ball and the restarts here" to run it
+all on the serving machine instead, when that machine has the model.
+
+A match opens into the review. The page plays the match at each
 event the pipeline wrote, draws the taker, the ball and every tracked
 box, and takes one of four taps: right; wrong kind; wrong taker, by
 tapping the right player; not an event. With a roster uploaded it also
@@ -108,10 +124,11 @@ curl -fsSL https://raw.githubusercontent.com/dawsboss/Sports-Camera-Analytics-/m
 or clone the repository and run `deploy/install-homelab.sh`. It makes a
 `sideline` user, a checkout and a virtualenv under `/srv/sideline`, and a
 systemd service (`deploy/sideline.service`) that serves the API and the
-review page on port 8000 of every interface, from boot. Run it again to
-update. Matches live in `/srv/sideline/data`, the layout
-`sideline ingest --data` writes, so a match processed on the GPU machine
-arrives with:
+review page on port 8000 of every interface, from boot, with uploads
+running on a background thread of the service. Run it again to update.
+Matches live in `/srv/sideline/data`, the layout `sideline ingest --data`
+writes, so a match can also be processed whole on the GPU machine and
+copied in:
 
 ```
 rsync -a --delete ./data/ sideline@<homelab>:/srv/sideline/data/
