@@ -1,10 +1,10 @@
 ---
 name: house-style
-description: How this repo writes commit messages, CHANGELOG.md entries and PR descriptions. Load before writing any of them, instead of reading CHANGELOG.md or git log for examples.
+description: How this repo writes commit messages and PR descriptions. Load before writing either, instead of reading git log for examples.
 user-invocable: false
 ---
 
-# Commits, CHANGELOG and PRs in this repo
+# Commits and PRs in this repo
 
 The history reads like a lab notebook. Each entry says what was wrong or
 unknown, what was measured, what changed, and what that means for the
@@ -32,25 +32,9 @@ next step. Give numbers, not adjectives.
 
 ## CHANGELOG.md
 
-- **Oldest first.** New entries go at the bottom of the file.
-- Heading: `## 0.1.N — <lowercase phrase: what changed or was learned>`,
-  with an em dash. Example: `## 0.1.8 — the first training run, on a
-  gaming PC, and what it found first`.
-- One entry per branch or PR. If the last entry's heading is not on
-  `origin/<base>` yet, it belongs to this branch's work: add to it when
-  this change is part of that work, otherwise start the next patch
-  version. If the last entry is already on the base, start the next
-  patch version.
-- Shape: an opening paragraph with what happened and the headline
-  finding, then bullets. Each bullet starts with a **bold claim** or a
-  **`file name`** and continues in prose: what was wrong, how it was
-  measured, what happens now, and the number. Point to the file that
-  holds the measurements (for example `spike/evals/training_2026-09-23.md`).
-- State what did *not* work as plainly as what did. A negative
-  measurement counts as a result here.
-- Wrap at the width the file already uses (about 74 columns).
-- Every shipped change gets an entry, except pure merges and rewraps or
-  typo fixes.
+Retired on 31 October 2026 at 0.1.14, at the owner's request: git is the
+history. Do not add entries. The commit body carries what an entry used to
+(what was wrong or unknown, what was measured, what changed, the numbers).
 
 ## PR descriptions
 

@@ -21,6 +21,7 @@ class MatchRecord:
     pitch_length: float = 105.0
     pitch_width: float = 68.0
     kickoff_offset_ms: Optional[int] = None
+    periods: Optional[dict] = None      # soccer-manager's periods node, copied at upload
 
 
 @dataclass

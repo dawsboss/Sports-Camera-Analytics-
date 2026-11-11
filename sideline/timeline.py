@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+import math
+
 
 @dataclass(frozen=True)
 class Period:
@@ -105,3 +107,68 @@ def stints_from_sm(node: dict) -> list[Stint]:
         out.append(Stint(player_id=str(s["pid"]), on_s=float(s.get("on", 0)),
                          off_s=float(off) if off is not None else None))
     return sorted(out, key=lambda s: s.on_s)
+
+
+def period_starts_video_ms(kickoff_offset_ms: int, periods: Iterable[Period]) -> list[int]:
+    """The video timestamp at which each period began. The first is the
+    kickoff offset by definition; the rest follow from the wall-clock gaps
+    the minutes app recorded."""
+    ordered = sorted(periods, key=lambda p: p.start_ms)
+    if not ordered:
+        return []
+    first = ordered[0].start_ms
+    return [kickoff_offset_ms + (p.start_ms - first) for p in ordered]
+
+
+def video_ms_for_elapsed(elapsed_s: float, kickoff_offset_ms: int, periods: list[Period]) -> Optional[int]:
+    """The inverse of `match_seconds`: the video timestamp at which the match
+    clock read `elapsed_s`. None with no periods or past the end of the
+    closed ones. Half-time has no match seconds, so a tap can never land in
+    the break."""
+    if not periods:
+        return None
+    ordered = sorted(periods, key=lambda p: p.start_ms)
+    first = ordered[0].start_ms
+    remaining = elapsed_s * 1000.0
+    for p in ordered:
+        length = math.inf if p.end_ms is None else p.end_ms - p.start_ms
+        if remaining <= length:
+            wall = p.start_ms + remaining
+            return int(round(wall - first + kickoff_offset_ms))
+        remaining -= length
+    return None
+
+
+@dataclass(frozen=True)
+class Tap:
+    """One thing the coach logged on the minutes app's Track tab while it
+    happened: `matches/{id}/events/{eid}` is {t, at, side, kind, pid?}, with
+    goals, shots and turnovers in sibling nodes of the same shape. `t` is
+    the match clock in whole seconds at the tap, so it trails the event by
+    the coach's reaction; `at` is the tap's wall-clock millisecond."""
+
+    kind: str                    # corner | throw | goalkick | foul | keeper | goal | shot | poss
+    side: str                    # 'us' | 'them'
+    elapsed_s: float
+    at_ms: Optional[int] = None
+    player_id: Optional[str] = None
+    id: Optional[str] = None
+
+
+def taps_from_sm(match: dict, collections: Iterable[str] = ("events", "goals", "shots", "poss")) -> list[Tap]:
+    """Everything tapped on a soccer-manager match node, oldest first.
+    `events` carry their kind; the other nodes are their own kind, and a
+    turnover's side is the side that won it."""
+    out: list[Tap] = []
+    for coll in collections:
+        for eid, x in (match.get(coll) or {}).items():
+            if not isinstance(x, dict) or "t" not in x:
+                continue
+            kind = x.get("kind", coll[:-1] if coll != "poss" else "poss") if coll == "events" else {
+                "goals": "goal", "shots": "shot", "poss": "poss"}[coll]
+            side = x.get("to") if coll == "poss" else x.get("side")
+            pid = x.get("pid")
+            out.append(Tap(kind=str(kind), side=str(side) if side is not None else "", elapsed_s=float(x["t"]),
+                           at_ms=int(x["at"]) if x.get("at") is not None else None,
+                           player_id=str(pid) if pid is not None else None, id=str(eid)))
+    return sorted(out, key=lambda t: (t.elapsed_s, t.at_ms or 0))

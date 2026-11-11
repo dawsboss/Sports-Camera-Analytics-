@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Commit the current work, sync with the branch's remote and its base, run the tests and push, all through the git-shepherd agent, which writes the message and CHANGELOG entry in house style. Use when the user asks to commit, push or ship.
+description: Commit the current work, sync with the branch's remote and its base, run the tests and push, all through the git-shepherd agent, which writes the message in house style. Use when the user asks to commit, push or ship.
 argument-hint: "[base-branch] [notes on why]"
 ---
 
@@ -12,7 +12,7 @@ here.
    - `mode: ship`
    - `why:` 2-6 sentences: what was wrong, missing or measured, what
      changed, and the evidence, with numbers. This becomes the commit
-     body and the CHANGELOG entry. Fold in any notes from: $ARGUMENTS
+     body. Fold in any notes from: $ARGUMENTS
    - `files:` the paths this change touched, if other uncommitted work
      is lying around.
    - `base:` if the arguments name one, or the branch was cut from

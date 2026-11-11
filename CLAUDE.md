@@ -23,6 +23,10 @@ frame is a problem a fixed camera does not have, so a cheap fixed-camera
 test comes before more registration or ball training; M3 starts now on
 the Veo footage; and the next follow-cam registrar is clicked keyframes
 plus tracking of the fixed background, not a fine-tuned line model.
+**Since 31 October restarts are found without registration** (NEXT.md,
+"Restarts without registration"): S2, S3 and the events half of S8 exist,
+and a restart is a ball that sat still and was struck or thrown, named by
+what surrounded it in heights of the taker, never in metres or pixels.
 
 ## Required after every change
 
@@ -59,13 +63,31 @@ plus tracking of the fixed background, not a fine-tuned line model.
   event grammar and stat definitions come from `sideline/sports/` through
   `get_sport()`. The test of the boundary is that basketball is a court
   model and a rules file, touching zero detection, tracking or review code.
+  The event stage measures a dead ball (`DeadBall`) and the plugin names it
+  (`classify_restart`); no code outside `sports/` knows the word throw-in,
+  only the docstrings that say so.
+- **Event thresholds are in heights of the people, not pixels or metres,
+  and each sport states its own** in its `EventGrammar`; `sports/base.py`
+  carries no defaults to inherit. That is what lets the same rule hold on
+  a frame registration could not place, on a zoomed corner and at the far
+  end of a static view. A rule in pixels would be a follow-cam shortcut
+  that constrains the static path.
+- **The event stage reads the camera's motion from registration when it
+  exists** and estimates it from the people only where it does not. It
+  never asks which camera; it asks whether S5 placed the frame. The
+  people estimate mistakes a coherent jog for a pan, which on a fixed
+  camera is the case S5's one-off calibration removes.
 - **Stints are the truth for who was on the pitch**, read from
   soccer-manager and bridged through `timeline.py` (`match_seconds`,
   `on_pitch`). Roster, stints and periods are copied at upload, never
   linked, so a roster edit a month later does not change an analysis.
-- **Raw video never leaves the homelab.** The API serves JSON artifacts
-  only; frames, video and Parquet are read by stages and the review UI
-  through the blob store. Only `player_stats.json` goes to Firebase.
+- **Nothing derived from the video leaves the network.** The API serves
+  JSON artifacts and, for the review page, S1's sampled frames and S3's
+  boxes to browsers on the LAN or a Tailscale network; at 5 fps that is
+  most of the footage, so the API is never exposed to the internet and
+  never put behind a public tunnel. Video and Parquet are never served.
+  Only `player_stats.json` goes to Firebase. (Amended 31 October when the
+  owner asked for the review page to be hosted on his own network.)
 - **The camera side is a convention, not a detection.** The pitch is
   symmetric under a half turn, so `FollowCamConfig.camera_side` says which
   touchline the camera stands on (default `y < 0`), and pitch x is
@@ -146,19 +168,56 @@ plus tracking of the fixed background, not a fine-tuned line model.
 - **Pitch dimensions are assumed, not known.** The search runs with
   105 x 68 and both real pitches are smaller. The upload carries them;
   nobody has measured either field.
-- No S2 onward: no detection, tracking, team assignment, identity, review,
-  stats or publish. `contracts.py` already defines what they write.
+- **S2, S3 and the events half of S8 exist but have not met real footage.**
+  Detection is an Ultralytics checkpoint behind `Detector`; tracking is a
+  dependency-free two-pass tracker; `events.py` finds dead balls and the
+  soccer plugin names them. All of it is tested on scripted scenes only.
+  The confidences in `SoccerPlugin.classify_restart` are priors until
+  `spike/evals/restarts_on_taps.py` has run on both Veo exports against
+  the minutes app's taps. Only detection is a trained model (a COCO
+  checkpoint nobody here trained); tracking and the restart rules are
+  rules, and corrections set their thresholds rather than train them.
+- **Corner against goal kick is told apart by the corner flag and the goal**,
+  which the soccer plugin declares as landmark entity classes, or by the
+  keeper once S4 labels her. No detector emits `goal` or `corner_flag`
+  yet: goal posts and crossbars are annotated in SoccerNet calibration
+  (25k frames) and can be pretrained from there; corner flags need our own
+  box tags. Until a detector does, the plugin says `restart` there, not a
+  guess. A landmark seen in two frames is also the exact camera motion,
+  which the people estimate only approximates.
+- **No open-play events yet** (passes, crosses, turnovers). A cross without
+  pitch coordinates is a long aerial ball ending near the goal landmark;
+  it needs the ball held through flight, which is the blackout tail, and
+  the goal detector above. `sideline overlay` renders what the stages saw
+  so a run can be watched.
+- **The review page is for events only and the verdicts are not read back
+  yet.** `web/review.html`, served by the API at `/review` with a
+  same-origin content policy, writes `EventDecision` rows (right / wrong
+  kind / wrong taker / not an event, each checked against a real events
+  version, an event in it, the sport's event types and a track of the
+  tracking version it was built on) and `ReviewDecision` rows for a
+  track's name, scoped to that tracking version. Nothing consumes them:
+  the scorer still reads only the minutes app's taps, S6 does not exist,
+  and a new events version starts with no verdicts. Replaying them by time
+  onto a new version, and scoring against them, is the next step. There
+  is no login; `decided_by` is whatever the reviewer typed.
+- No S4 team assignment, S6 identity, S8 stats or S9 publish; S7 review
+  exists for events only. `contracts.py` already defines what they write.
+  Events carry the taker as a `track_id`; the name arrives as a review
+  decision (the page's "Name the taker") or from S6, and the minutes
+  app's attributed taps are a free labelled set for S6.
 - Where `player_stats.json` sits under the fixture in soccer-manager's
   schema is undecided; that is a schema change on the other repo and is
   high-stakes there. Do not pick a path unilaterally.
 - The compose worker image is CPU-only; the CUDA/Ultralytics image is M3.
-- `RQQueue` and `MinioBlobStore` are exercised only by the compose stack,
-  not by the tests.
+- `RQQueue`, `MinioBlobStore` and `UltralyticsDetector` are exercised only
+  on the compose stack or the GPU box, not by the tests.
 
 ## Conventions
 
-- Commit messages: short summary line, blank line, body explaining *why*.
-  Every shipped change gets a `CHANGELOG.md` entry.
+- Commit messages: short summary line, blank line, body explaining *why*,
+  with the numbers. The commit body is the record; `CHANGELOG.md` stopped
+  at 0.1.14 (31 October) and is not maintained. `git log` is the history.
 - Comments explain reasoning, not mechanics; the invariants above set the tone.
 - No AI model is called from this pipeline's runtime, and none from
   soccer-manager ever.
@@ -170,8 +229,8 @@ design. Using them is standing permission from the user.
 
 - **git-shepherd** does every commit, pull, push, PR and branch deletion
   (`/sync`, `/ship`, `/pr`).
-  - Give it the *why*. It writes the commit message and CHANGELOG entry
-    to `.claude/skills/house-style`.
+  - Give it the *why*. It writes the commit message to
+    `.claude/skills/house-style`.
   - It merges both the branch's remote and its base.
   - It stops on a conflict or a failing test, and never force-pushes.
   - After a PR it offers the branch for deletion: only the local branch

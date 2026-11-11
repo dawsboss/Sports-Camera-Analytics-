@@ -3,7 +3,7 @@ import pytest
 from datetime import datetime, timezone
 
 from sideline.contracts import (
-    Aggregate, CaptureMode, EVENTS_SCHEMA, MODE_A_ONLY_STATS, PlayerStats, PlayerStatsDoc,
+    Aggregate, CaptureMode, EVENTS_SCHEMA, FRAGMENTS_SCHEMA, MODE_A_ONLY_STATS, PlayerStats, PlayerStatsDoc,
     REGISTRATION_SCHEMA, TRACKS_SCHEMA, Team, ZoneHistogram,
 )
 
@@ -37,7 +37,15 @@ def test_tracks_schema_matches_spec_table():
 
 
 def test_events_schema_matches_spec():
-    assert EVENTS_SCHEMA.names == ["t_ms", "type", "x_pitch", "y_pitch", "player_id", "team", "confidence"]
+    # The spec's seven columns, in its order, then the taker's track: a
+    # restart is attributed to a box in the video before anyone names it.
+    assert EVENTS_SCHEMA.names == ["t_ms", "type", "x_pitch", "y_pitch", "player_id", "team", "confidence", "track_id"]
+    assert EVENTS_SCHEMA.field("track_id").nullable and EVENTS_SCHEMA.field("x_pitch").nullable
+
+
+def test_fragments_are_image_space_tracks():
+    assert FRAGMENTS_SCHEMA.names == ["frame_index", "t_ms", "track_id", "cls", "x1", "y1", "x2", "y2", "conf"]
+    assert not FRAGMENTS_SCHEMA.field("track_id").nullable
 
 
 def test_registration_schema_holds_a_nullable_3x3():

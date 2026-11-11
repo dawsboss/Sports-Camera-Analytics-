@@ -309,6 +309,168 @@ of the wish list needs a different rig — higher, closer, or a second
 camera — and the fixed-camera test is where that shows, for the price of
 an afternoon.
 
+## Restarts without registration (31 October)
+
+The question was whether the follow-cam footage can give what the coach
+asked for, which restart happened and who took it, without the per-frame
+registration M1 could not deliver. It can, for most of it, and the reason
+is that the part of "Restarts, and counting them" above that said *where*
+on the pitch was needed is only true for one pair of restarts.
+
+**A restart has a physical signature the camera sees without knowing
+where it is.** The ball stops, and is then struck or thrown. Which restart
+it was is written in what surrounds that moment, not in pitch metres:
+
+| Restart | What tells it apart, with no pitch coordinates |
+| --- | --- |
+| Throw-in | the only restart taken with the ball in the hands, above the head |
+| Keeper claim | the ball in the keeper's hands (a possession marker, and the minutes app counts it) |
+| Goal kick | a grounded ball put back into play by the keeper |
+| Kick-off | the first dead ball of a period |
+| Corner | the taker alone, with every other player beyond the ball |
+| Free kick | a grounded ball with players around it |
+
+The one pair that genuinely needs the pitch is **corner against goal kick
+when the detector cannot tell a keeper from a player**: both are a lone
+taker at the end of the pitch with everyone else beyond the ball. A COCO
+detector cannot, so until team assignment (S4) labels the keeper by kit,
+that case is reported as `restart` with the reason, not guessed. S4 is
+the next thing this needs, and it needs no registration either.
+
+**What was built.** S2, S3 and the first half of S8, all CPU-tested with
+no model and no footage, on scripted scenes of each restart:
+
+- `s2_detection`: an Ultralytics checkpoint behind a `Detector` protocol
+  (COCO out of the box; the fine-tuned ball model when it earns it), the
+  sport plugin's class names, and people whose feet are off the grass
+  dropped, because every Veo frame has coaches and spectators along the
+  touchline. `detections.parquet`.
+- `s3_tracking`: ByteTrack's two-pass idea with no dependencies. People
+  are matched by box overlap or, when a runner moves her own height between
+  5 fps samples and overlaps nothing, by centre distance in heights. The
+  ball is matched by where it went and may vanish for 15 samples, which is
+  the measured blackout tail. `fragments.parquet`, image pixels.
+- `s8_events`: `sideline/events.py` finds every moment the ball sat still
+  and was put back into play, after subtracting the camera's motion, and
+  measures who was nearest, whether the ball sat high in their box, how
+  alone they were and how far beyond everyone else the ball lay, all in
+  heights of the person nearest the ball. The sport plugin names it
+  (`SoccerPlugin.classify_restart`). `events.parquet`, with the taker as a
+  `track_id` and pitch coordinates null. The camera's motion is read from
+  registration's homographies wherever consecutive frames were placed,
+  which on a fixed camera is exactly zero; where they were not, which is
+  every Veo frame today, it is estimated as the median shift of the people
+  in frame. That estimate is right for a pan and wrong for the second in
+  which most players jog the same way, so on a fixed camera the restart
+  stage wants S5's one-off calibration done first, and the stage never asks
+  which camera it is: it asks whether registration has spoken.
+- `events.csv` beside the Parquet, and `sideline log <match>`: the list
+  the coach asked for, one line per event with the match clock (through
+  the timeline, from the kickoff offset and the copied periods), what
+  happened, who took it, how sure, and why it was called that. Every
+  restart is a possession change, so this list is the possession log too,
+  short of the open-play turnovers that need the ball tracked through play.
+- `spike/evals/restarts_on_taps.py` scores the result against the minutes
+  app's Track-tab taps, per kind, with the reaction lag allowed for, and
+  separates "dead ball found but misnamed" from "missed", because they are
+  different failures.
+
+**Watching it, and steering it (31 October, later).** Three answers to
+the questions a coach asks about a run.
+
+- *Is this a trained model?* Only the detector is, and nobody here trained
+  it: S2 is a COCO checkpoint that knows what a person and a ball look
+  like. Tracking is rules. Finding a dead ball is rules. Naming it is rules
+  in the soccer plugin, with thresholds in heights and confidences that
+  are priors. So a correction does not "train" anything today; it measures
+  the rules and moves a threshold, which `restarts_on_taps.py` does from
+  the minutes app's taps. A trained event classifier is possible later,
+  and the taps plus corrections are exactly its training set; it would sit
+  behind `classify_restart` and the stage would not know.
+- *Can I watch it?* `sideline overlay <match>` renders the sampled frames
+  with every fragment drawn, the ball's recent path, and at each event a
+  caption with the clock, the call, the taker and the reason;
+  `--around 8` keeps only the seconds around events. `sideline log`
+  prints the same list. Neither exists in a browser yet.
+- *Can I steer it?* Yes, from the start, at the owner's call: M6's review
+  UI exists, scoped to events. `web/review.html` is served by the API at
+  `/review?match=<id>` and plays the match at each event from S1's cached
+  frames, draws the taker, the ball and every tracked box from S3, and
+  takes one of four taps: right; wrong kind, pick the kind; wrong taker,
+  tap the right box; not an event. With a roster it names the taker. Each
+  tap is a row (`EventDecision`, keyed by the events version and the
+  event's time; `ReviewDecision` for a track's name), never an edit to the
+  artifact, and `GET /matches/<id>/review/decisions` exports them. Those
+  rows do two things: they score the rules per kind alongside the minutes
+  app's taps (`restarts_on_taps.py` should read them next), and they
+  accumulate into the labelled set a learned classifier would train on.
+- *Where does it run?* On your own network, which is what the spec always
+  said: compute on the homelab, the UI reaching it over the LAN or
+  Tailscale, raw video and frames never leaving. The tagger could live on
+  GitHub Pages because it needs only Veo's CDN; the review page needs the
+  pipeline's own frames and boxes, so it is served by the pipeline.
+  `sideline serve --data ./data` on the machine that ran the match is
+  enough; a phone on the same wifi opens the page. Never expose the API to
+  the open internet or put it behind a public tunnel: it serves frames,
+  which at 5 fps are most of the footage. Tailscale is the way in from
+  outside; the spec's Cloudflare Tunnel option does not apply to this API.
+
+**The flag and the net.** The coach's own cue for corner against goal
+kick is the right one: a ball by the corner flag is a corner, a ball in
+front of the net is a goal kick, whatever the detector calls the taker.
+The soccer plugin now declares `goal` and `corner_flag` as landmark
+entity classes, the event stage reports each landmark's distance from
+the dead ball in taker heights (`DeadBall.landmarks_h`, by name, knowing
+nothing of what a flag is), and the rules read them ahead of the keeper.
+A landmark seen in two frames is also the camera's motion exactly, which
+the people estimate only approximates, so the fallback improves the
+moment one is detected. What is missing is a detector that emits them.
+Goal posts and crossbars are annotated as named lines in SoccerNet's
+calibration set (25k broadcast frames; `spike/evals/soccernet.py`
+downloads it), so a goal detector can be pretrained there and shown this
+footage. Corner flags are annotated nowhere public, so they need our own
+box tags: a box mode in the tagger, a few dozen per field.
+
+**Crosses.** A cross without pitch coordinates is a long aerial ball
+played from far from the goal to near it: the ball leaves a player's
+reach, travels many heights, and comes down within a few heights of the
+goal landmark among players. That is an open-play event, the first that
+is not a dead ball, and it has two dependencies, both already on the
+list: the goal detector above, and the ball held through flight, where a
+white ball against the trees is exactly the measured blackout. So
+crosses follow the goal detector and the first real ball numbers; the
+rule itself is small. Corners are crosses too, which is one more reason
+the flag matters.
+
+**Who took it.** Today the answer is a track: the box nearest the ball when
+it was released. The name comes two ways, neither needing registration.
+Identity resolution (S6) links fragments to the roster through kit colour
+and stints, and the review UI names a linked track once. And the minutes
+app already carries the answer for the restarts the coach attributed: a
+tap that says "throw-in, number 7, 23:14" names the thrower's track for
+free. Those attributed taps are a labelled identity set nobody had to
+click for, and S6 should read them before it asks a human anything.
+
+**What this still needs, in order.** The ball found often enough that a
+restart's stationary second is seen: the dead-ball test needs five
+consecutive samples, and the measured median gap of one to two is fine
+while the 8-15 sample tail will lose some restarts entirely. S4, for the
+keeper and for the team on every event. Then the first run on both Veo
+exports against their taps, which sets every constant in soccer's
+`EventGrammar` and every confidence in `classify_restart`; they are priors
+now. The eval script reports the median offset between tap and event,
+which is the coach's reaction time and the right window to score with.
+The minutes app's periods, copied at upload, are what name the kick-offs;
+without them S0's half-time hint stands in and the manifest says so.
+
+**Nothing here constrains the static path.** The same stages run on a
+fixed camera with every threshold unchanged, because none is in pixels or
+metres, and the scale at the far touchline is the far player's height, not
+the frame's. Placing an event on the pitch once registration exists is a
+projection of its ball position through that frame's homography; that
+step is not written yet, and when it is it will be a new events version,
+not a second search.
+
 ## How to store the videos, and what matters more
 
 **The Veo link is enough.** The `standard/machine` rendition, which is

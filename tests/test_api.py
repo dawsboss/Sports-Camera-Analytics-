@@ -17,7 +17,8 @@ def client(tmp_path):
 
 def test_health(client):
     r = client.get("/health")
-    assert r.status_code == 200 and r.json()["stages"] == ["s0_ingest", "s1_sampling"]
+    assert r.status_code == 200
+    assert r.json()["stages"] == ["s0_ingest", "s1_sampling", "s2_detection", "s3_tracking", "s8_events"]
 
 
 def test_upload_runs_s0_and_s1_and_answers_what_exists(client, clip):
@@ -34,7 +35,7 @@ def test_upload_runs_s0_and_s1_and_answers_what_exists(client, clip):
     assert m["sm_match_id"] == "sm-42" and m["pitch_length"] == 100.0
     assert [j["stage"] for j in m["jobs"]] == ["s0_ingest", "s1_sampling"]
     assert all(j["status"] == "done" and j["artifact_version"] == 1 for j in m["jobs"])
-    assert m["artifacts"] == {"s0_ingest": [1], "s1_sampling": [1]}
+    assert m["artifacts"] == {"s0_ingest": [1], "s1_sampling": [1], "s2_detection": [], "s3_tracking": [], "s8_events": []}
 
     r = client.get(f"/matches/{m['id']}")
     assert r.status_code == 200 and r.json()["id"] == m["id"]
@@ -70,4 +71,4 @@ def test_bad_inputs_are_refused(client, clip):
 def test_upload_without_stages_only_registers(client, clip):
     with clip.open("rb") as f:
         r = client.post("/matches", files={"file": ("clip.mp4", f, "video/mp4")}, data={"run": "false"})
-    assert r.status_code == 201 and r.json()["jobs"] == [] and r.json()["artifacts"] == {"s0_ingest": [], "s1_sampling": []}
+    assert r.status_code == 201 and r.json()["jobs"] == [] and all(v == [] for v in r.json()["artifacts"].values())

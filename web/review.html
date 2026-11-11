@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16150F">
+<title>Sideline Review</title>
+<style>
+  /* The same dark room as the tagger: a bright frame, quiet chrome. */
+  :root {
+    --ground: #16150F; --panel: #22201A; --raised: #2C2922; --line: #3A362C;
+    --chalk: #F2EFE4; --muted: #9A9484; --flag: #F2603C; --grass: #7FA650; --sky: #7FA3B8;
+    --ok: #7FA650; --bad: #F2603C; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --ui: system-ui, -apple-system, "Segoe UI", sans-serif; color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--chalk); font-family: var(--ui); font-size: 15px; line-height: 1.4; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  button { font: inherit; color: inherit; cursor: pointer; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--grass); color: #10140A; border-color: transparent; font-weight: 600; }
+  button.danger { background: var(--bad); color: #fff; border-color: transparent; }
+  button.on { outline: 2px solid var(--flag); }
+  select, input { font: inherit; color: inherit; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .app { height: 100%; display: grid; grid-template-columns: 300px 1fr; }
+  @media (max-width: 820px) { .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } .list { max-height: 36vh; } }
+  .list { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
+  .list header { padding: 14px 14px 8px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .list header small { color: var(--muted); font-weight: 400; }
+  .ev { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; padding: 9px 14px; border-top: 1px solid var(--line); cursor: pointer; align-items: center; }
+  .ev:hover { background: var(--raised); }
+  .ev.sel { background: var(--raised); box-shadow: inset 3px 0 var(--flag); }
+  .ev .clock { font-family: var(--mono); color: var(--muted); }
+  .ev .kind { font-weight: 600; }
+  .ev .who { color: var(--muted); font-size: 13px; }
+  .badge { font-size: 12px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.right { color: var(--ok); border-color: var(--ok); }
+  .badge.wrong_type, .badge.wrong_taker { color: var(--flag); border-color: var(--flag); }
+  .badge.not_event { color: var(--muted); text-decoration: line-through; }
+  .stage { display: flex; flex-direction: column; min-width: 0; }
+  .frame { position: relative; background: #000; flex: 1; min-height: 240px; display: flex; align-items: center; justify-content: center; }
+  canvas { max-width: 100%; max-height: 100%; display: block; }
+  .caption { position: absolute; left: 0; right: 0; top: 0; padding: 8px 12px; background: rgba(20,20,20,.78); display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  .caption b { font-size: 17px; }
+  .caption .why { color: var(--muted); font-size: 13px; }
+  .caption .conf { font-family: var(--mono); color: var(--sky); }
+  .hint { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 12px; background: rgba(242,96,60,.85); color: #fff; font-weight: 600; }
+  .scrub { display: flex; gap: 10px; align-items: center; padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--line); }
+  .scrub input[type=range] { flex: 1; }
+  .scrub .t { font-family: var(--mono); color: var(--muted); min-width: 110px; text-align: right; }
+  .verdicts { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 12px 14px; background: var(--panel); align-items: center; }
+  .verdicts .sp { flex: 1; }
+  .verdicts .who { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+  .empty { padding: 40px; color: var(--muted); text-align: center; }
+  kbd { font-family: var(--mono); font-size: 12px; background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="list">
+    <header><span>Events <small id="count"></small></span><small id="matchid"></small></header>
+    <div id="events"></div>
+    <div id="empty" class="empty" hidden></div>
+  </aside>
+  <main class="stage">
+    <div class="frame">
+      <canvas id="c" width="16" height="9"></canvas>
+      <div class="caption" id="caption" hidden></div>
+      <div class="hint" id="hint" hidden>Tap the player who actually took it</div>
+    </div>
+    <div class="scrub">
+      <button id="play" title="space">▶</button>
+      <input type="range" id="scrubber" min="0" max="0" value="0" step="1">
+      <span class="t" id="time"></span>
+    </div>
+    <div class="verdicts">
+      <button class="primary" id="right" title="1">✓ Right</button>
+      <select id="kind"></select>
+      <button id="wrongkind">Wrong kind</button>
+      <button id="wrongtaker" title="click a box">Wrong taker</button>
+      <button class="danger" id="notevent" title="0">Not an event</button>
+      <span class="sp"></span>
+      <span class="who">
+        <select id="roster" hidden></select>
+        <button id="name" hidden>Name the taker</button>
+        <input id="by" placeholder="your name" size="10">
+      </span>
+    </div>
+    <div class="verdicts" style="padding-top:0;color:var(--muted);font-size:13px">
+      <kbd>j</kbd>/<kbd>k</kbd> next / previous event &nbsp; <kbd>←</kbd>/<kbd>→</kbd> step frames &nbsp; <kbd>space</kbd> play &nbsp; <kbd>1</kbd> right &nbsp; <kbd>0</kbd> not an event
+    </div>
+  </main>
+</div>
+<script>
+/* The review page: play the match at each event the pipeline wrote, draw
+   what the stages saw, and take one of four taps. Every tap is a row on the
+   API, never an edit to the artifact. Served by the Sideline API on your own
+   network; it reaches nothing else. */
+(() => {
+  const qs = new URLSearchParams(location.search);
+  const matchId = qs.get('match');
+  const $ = id => document.getElementById(id);
+  // Roster names, verdict kinds and reasons are free text from the API's
+  // database; nothing from them is ever interpreted as markup.
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const canvas = $('c'), ctx = canvas.getContext('2d');
+  const state = { doc: null, i: -1, frames: [], f: 0, images: new Map(), playing: null, pickTaker: false, kinds: {} };
+  $('by').value = localStorage.getItem('sideline.review.by') || '';
+  $('by').addEventListener('change', () => localStorage.setItem('sideline.review.by', $('by').value));
+  const by = () => $('by').value.trim() || 'coach';
+
+  async function api(path, opts) {
+    const r = await fetch(path, opts);
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json();
+  }
+  function fail(msg) {
+    $('empty').hidden = false; $('empty').textContent = msg;
+  }
+  if (!matchId) {
+    fail('Open this page from the Sideline API on your network as /review?match=<match id>. `sideline serve --data ./data` after a run, then the match id `sideline ingest` printed.');
+    return;
+  }
+
+  function who(e) {
+    const d = e.decision;
+    const track = d && d.verdict === 'wrong_taker' ? d.corrected_track : e.taker_track;
+    const name = state.doc.track_names[String(track)] || (track === e.taker_track ? e.player_id : null);
+    const roster = state.doc.roster || {};
+    const label = name && roster[name] ? (roster[name].number != null ? `#${roster[name].number} ` : '') + (roster[name].name || name) : name;
+    return label || (track ? `track ${track}` : 'nobody near');
+  }
+  function kindOf(e) { return e.decision && e.decision.verdict === 'wrong_type' ? e.decision.corrected_type : e.type; }
+
+  function renderList() {
+    const el = $('events'); el.innerHTML = '';
+    const evs = state.doc.events;
+    $('count').textContent = `${evs.filter(e => e.decision).length}/${evs.length} reviewed`;
+    $('matchid').textContent = matchId.slice(0, 8);
+    if (!evs.length) { fail('No events in this match yet. Run s8_events first.'); return; }
+    evs.forEach((e, i) => {
+      const row = document.createElement('div');
+      row.className = 'ev' + (i === state.i ? ' sel' : '');
+      row.dataset.i = i;
+      const badge = e.decision ? `<span class="badge ${esc(e.decision.verdict)}">${esc(e.decision.verdict.replace('_', ' '))}</span>` : `<span class="badge">${esc(e.confidence)}</span>`;
+      row.innerHTML = `<span class="clock">${esc(e.clock)}</span><span><div class="kind">${esc(kindOf(e).replace('_', ' '))}</div><div class="who">${esc(who(e))}</div></span>${badge}`;
+      row.addEventListener('click', () => select(i));
+      el.appendChild(row);
+    });
+  }
+
+  async function select(i) {
+    stop();
+    state.i = i;
+    const e = state.doc.events[i];
+    renderList();
+    const data = await api(`/matches/${matchId}/review/frames?t_ms=${e.t_ms}&span_s=4`);
+    state.frames = data.frames; state.kinds = data.kinds; state.images.clear();
+    // Start on the sample nearest the release, with the ones around it loading.
+    let best = 0;
+    state.frames.forEach((f, k) => { if (Math.abs(f.t_ms - e.t_ms) < Math.abs(state.frames[best].t_ms - e.t_ms)) best = k; });
+    $('scrubber').max = Math.max(0, state.frames.length - 1);
+    state.frames.forEach(f => { if (f.cached) { const im = new Image(); im.src = f.url; im.onload = () => { if (state.frames[state.f] === f) draw(); }; state.images.set(f.frame_index, im); } });
+    showFrame(best);
+    $('caption').hidden = false;
+    $('caption').innerHTML = `<span>${esc(e.clock)}</span><b>${esc(kindOf(e).replace('_', ' ').toUpperCase())}</b><span>${esc(who(e))}</span><span class="conf">${esc(e.confidence)}</span><span class="why">${esc(e.reason)}</span>`;
+    const roster = state.doc.roster || {};
+    const ids = Object.keys(roster);
+    $('roster').hidden = $('name').hidden = !ids.length;
+    if (ids.length) {
+      $('roster').innerHTML = ids.map(id => `<option value="${esc(id)}">${roster[id].number != null ? '#' + esc(roster[id].number) + ' ' : ''}${esc(roster[id].name || id)}</option>`).join('');
+    }
+    state.pickTaker = false; $('hint').hidden = true; $('wrongtaker').classList.remove('on');
+  }
+
+  function showFrame(k) {
+    state.f = Math.max(0, Math.min(state.frames.length - 1, k));
+    $('scrubber').value = state.f;
+    const f = state.frames[state.f];
+    const e = state.doc.events[state.i];
+    if (f) $('time').textContent = `${(f.t_ms / 1000).toFixed(1)} s  (${((f.t_ms - e.t_ms) / 1000).toFixed(1)})`;
+    draw();
+  }
+
+  function draw() {
+    const f = state.frames[state.f]; if (!f) return;
+    const e = state.doc.events[state.i];
+    const im = state.images.get(f.frame_index);
+    const W = state.doc.match.width || 1920, H = state.doc.match.height || 1080;
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    if (im && im.complete && im.naturalWidth) ctx.drawImage(im, 0, 0, W, H);
+    const taker = e.decision && e.decision.verdict === 'wrong_taker' ? e.decision.corrected_track : e.taker_track;
+    const lw = Math.max(1, W / 960);
+    for (const b of f.boxes) {
+      const kind = state.kinds[b.cls] || 'person';
+      if (kind === 'object') {
+        ctx.strokeStyle = '#FFDC00'; ctx.lineWidth = lw * 2;
+        ctx.beginPath(); ctx.arc((b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2, Math.max(6, (b.x2 - b.x1)) , 0, Math.PI * 2); ctx.stroke();
+        continue;
+      }
+      const isTaker = b.track_id === taker;
+      ctx.strokeStyle = kind === 'landmark' ? '#E07BFF' : isTaker ? '#FFDC00' : '#7FA3B8';
+      ctx.lineWidth = isTaker ? lw * 3 : lw;
+      ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+      ctx.fillStyle = ctx.strokeStyle; ctx.font = `${Math.max(11, W / 110)}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.fillText(kind === 'landmark' ? b.cls : String(b.track_id), b.x1, Math.max(12, b.y1 - 4));
+    }
+  }
+
+  function play() {
+    if (state.playing || !state.frames.length) return;
+    $('play').textContent = '❚❚';
+    state.playing = setInterval(() => { if (state.f >= state.frames.length - 1) { stop(); return; } showFrame(state.f + 1); }, 200);
+  }
+  function stop() { if (state.playing) clearInterval(state.playing); state.playing = null; $('play').textContent = '▶'; }
+  $('play').addEventListener('click', () => state.playing ? stop() : play());
+  $('scrubber').addEventListener('input', ev => { stop(); showFrame(Number(ev.target.value)); });
+
+  async function decide(verdict, extra = {}) {
+    const e = state.doc.events[state.i]; if (!e) return;
+    const body = { events_version: state.doc.events_version, t_ms: e.t_ms, verdict, decided_by: by(), ...extra };
+    const d = await api(`/matches/${matchId}/review/decisions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    e.decision = { verdict: d.verdict, corrected_type: d.corrected_type, corrected_track: d.corrected_track, decided_by: d.decided_by, decided_at: d.decided_at };
+    renderList();
+    const next = state.doc.events.findIndex((x, k) => k > state.i && !x.decision);
+    if (next >= 0) select(next); else draw();
+  }
+  $('right').addEventListener('click', () => decide('right'));
+  $('notevent').addEventListener('click', () => decide('not_event'));
+  $('wrongkind').addEventListener('click', () => decide('wrong_type', { corrected_type: $('kind').value }));
+  $('wrongtaker').addEventListener('click', () => { state.pickTaker = !state.pickTaker; $('hint').hidden = !state.pickTaker; $('wrongtaker').classList.toggle('on', state.pickTaker); });
+  canvas.addEventListener('click', ev => {
+    if (!state.pickTaker) return;
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) * canvas.width / r.width, y = (ev.clientY - r.top) * canvas.height / r.height;
+    const f = state.frames[state.f]; if (!f) return;
+    const hit = f.boxes.filter(b => (state.kinds[b.cls] || 'person') === 'person' && x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2)
+      .sort((a, b) => (a.x2 - a.x1) * (a.y2 - a.y1) - (b.x2 - b.x1) * (b.y2 - b.y1))[0];
+    if (!hit) return;
+    state.pickTaker = false; $('hint').hidden = true; $('wrongtaker').classList.remove('on');
+    decide('wrong_taker', { corrected_track: hit.track_id });
+  });
+  $('name').addEventListener('click', async () => {
+    const e = state.doc.events[state.i]; if (!e) return;
+    const track = e.decision && e.decision.verdict === 'wrong_taker' ? e.decision.corrected_track : e.taker_track;
+    if (!track) return;
+    const pid = $('roster').value;
+    await api(`/matches/${matchId}/review/tracks`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tracks_version: state.doc.tracks_version, track_id: track, player_id: pid, decided_by: by() }) });
+    state.doc.track_names[String(track)] = pid;
+    renderList(); select(state.i);
+  });
+  document.addEventListener('keydown', ev => {
+    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
+    const n = state.doc ? state.doc.events.length : 0;
+    if (ev.key === 'j' && state.i < n - 1) select(state.i + 1);
+    else if (ev.key === 'k' && state.i > 0) select(state.i - 1);
+    else if (ev.key === 'ArrowRight') { stop(); showFrame(state.f + 1); }
+    else if (ev.key === 'ArrowLeft') { stop(); showFrame(state.f - 1); }
+    else if (ev.key === ' ') { ev.preventDefault(); state.playing ? stop() : play(); }
+    else if (ev.key === '1') decide('right');
+    else if (ev.key === '0') decide('not_event');
+  });
+
+  api(`/matches/${matchId}/review`).then(doc => {
+    state.doc = doc;
+    $('kind').innerHTML = doc.event_types.map(t => `<option value="${esc(t)}">${esc(t.replace('_', ' '))}</option>`).join('');
+    renderList();
+    const first = doc.events.findIndex(e => !e.decision);
+    if (doc.events.length) select(first >= 0 ? first : 0);
+  }).catch(err => fail(`Could not load the match: ${err.message}. Is this page served by the Sideline API (sideline serve) on your network?`));
+})();
+</script>
+</body>
+</html>

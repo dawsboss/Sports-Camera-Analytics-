@@ -43,3 +43,36 @@ def test_parsing_soccer_manager_nodes():
     assert [p.half for p in periods] == [1, 2] and periods[1].end_ms is None
     stints = stints_from_sm({"s1": {"pid": "p9", "on": 0, "off": 600}, "s2": {"pid": "p3", "on": 600}, "junk": 5})
     assert [(s.player_id, s.on_s, s.off_s) for s in stints] == [("p9", 0.0, 600.0), ("p3", 600.0, None)]
+
+
+def test_elapsed_maps_back_to_video_time_and_round_trips():
+    from sideline.timeline import video_ms_for_elapsed
+    # 4 min 30 s of match time is five minutes into the file.
+    assert video_ms_for_elapsed(270.0, KICKOFF_VIDEO_MS, [FIRST, SECOND]) == KICKOFF_VIDEO_MS + 270_000
+    # 32 minutes of match time is two minutes into the second half, past the ten-minute break.
+    assert video_ms_for_elapsed(1920.0, KICKOFF_VIDEO_MS, [FIRST, SECOND]) == KICKOFF_VIDEO_MS + 42 * 60_000
+    for e in (0.0, 17.5, 1799.0, 1800.0, 2500.0):
+        v = video_ms_for_elapsed(e, KICKOFF_VIDEO_MS, [FIRST, SECOND])
+        assert match_seconds(v, KICKOFF_VIDEO_MS, [FIRST, SECOND]) == e
+    assert video_ms_for_elapsed(10.0, KICKOFF_VIDEO_MS, []) is None
+    # Past the end of a closed match there is no video time.
+    assert video_ms_for_elapsed(1801.0, KICKOFF_VIDEO_MS, [FIRST]) is None
+
+
+def test_taps_from_a_soccer_manager_match_node():
+    from sideline.timeline import taps_from_sm
+    node = {
+        "events": {"e1": {"t": 755, "at": T0 + 1, "side": "us", "kind": "throw", "pid": "p7", "by": "u1"},
+                   "e2": {"t": 61, "at": T0, "side": "them", "kind": "corner"},
+                   "junk": 3},
+        "goals": {"g1": {"t": 900, "at": T0 + 5, "side": "us", "pid": "p9"}},
+        "shots": {"s1": {"t": 300, "side": "them", "onTarget": True}},
+        "poss": {"x1": {"t": 100, "to": "us"}},
+    }
+    taps = taps_from_sm(node)
+    assert [(t.kind, t.side, t.elapsed_s, t.player_id) for t in taps] == [
+        ("corner", "them", 61.0, None), ("poss", "us", 100.0, None), ("shot", "them", 300.0, None),
+        ("throw", "us", 755.0, "p7"), ("goal", "us", 900.0, "p9"),
+    ]
+    assert taps[3].at_ms == T0 + 1 and taps[3].id == "e1" and taps[2].at_ms is None
+    assert [t.kind for t in taps_from_sm(node, collections=("events",))] == ["corner", "throw"]

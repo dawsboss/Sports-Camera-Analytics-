@@ -97,8 +97,9 @@ break it, or needs evidence).
 12. **Things not to decide alone.** A chosen path for
     `player_stats.json` in soccer-manager's schema is not to be picked
     unilaterally.
-13. **Changelog.** A shipped change with no `CHANGELOG.md` entry
-    (entries go at the bottom, oldest first).
+13. **Changelog.** Retired at 0.1.14 (31 October 2026) at the owner's
+    request; do not ask for an entry. The commit body is the record, so
+    the thing to check is that it says *why*, with the numbers.
 
 ## Report
 

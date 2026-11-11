@@ -53,17 +53,84 @@ curl -F file=@match.mp4 -F capture_mode=followcam -F pitch_length=100 -F pitch_w
 The API docs are at `localhost:8000/docs`, MinIO's console at `:9001`. The
 upload takes the accompanying inputs the spec lists (`sm_match_id`, roster,
 stints and periods as JSON, kickoff offset, pitch dimensions), stores the
-file under `matches/{id}/source/`, and queues S0 then S1. Every stage writes
-`matches/{id}/{stage}/v{n}/` with a `manifest.json` recording its config and
-inputs; a re-run is a new version.
+file under `matches/{id}/source/`, and queues S0 then S1 unless `stages`
+names more. Every stage writes `matches/{id}/{stage}/v{n}/` with a
+`manifest.json` recording its config and inputs; a re-run is a new version.
+
+Players, the ball and restarts, on a machine with a GPU and the `eval`
+extra installed, with no services:
+
+```
+sideline ingest match.mp4 --kickoff-offset-ms 83000 \
+    --stages s0_ingest,s1_sampling,s2_detection,s3_tracking,s8_events
+python spike/evals/restarts_on_taps.py --match-dir data/blobs/matches/<id> --sm matches-node.json
+```
+
+The first writes `detections.parquet`, `fragments.parquet` and
+`events.parquet` (throw-ins, corners, goal kicks, free kicks, kick-offs,
+keeper claims, each with the taker's track), plus `events.csv`, the same
+rows as a coach would write them down: match clock, event, who, how sure.
+`sideline log <id>` prints that list and `sideline overlay <id>` renders
+it onto the frames. The eval script scores the events against the
+corners, throw-ins and goal kicks the coach tapped in the minutes app.
+`docs/NEXT.md`, "Restarts without registration", says why this needs no
+pitch coordinates and what it still needs.
+
+## Review, on your own network
+
+```
+sideline serve --data ./data          # the same directory `sideline ingest` wrote
+```
+
+Then open `http://<that machine>:8000/review?match=<id>` from any browser
+on the same network, phone included. The page plays the match at each
+event the pipeline wrote, draws the taker, the ball and every tracked
+box, and takes one of four taps: right; wrong kind; wrong taker, by
+tapping the right player; not an event. With a roster uploaded it also
+names the taker. Each tap is a row in the database (`event_decisions`,
+`review_decisions`), never an edit to an artifact, and
+`GET /matches/<id>/review/decisions` exports them. The frames the page
+shows are most of the footage at 5 fps and are served by this API to
+browsers on this network and nowhere else: keep the API on the LAN or a
+Tailscale network, never on the open internet and never behind a public
+tunnel (the spec's Cloudflare Tunnel option does not apply to this API).
+There is no login. The compose stack serves the same page at
+`:8000/review`.
+
+### On the homelab, as a service
+
+On a Debian or Ubuntu machine (a Proxmox LXC or VM), as root:
+
+```
+curl -fsSL https://raw.githubusercontent.com/dawsboss/Sports-Camera-Analytics-/main/deploy/install-homelab.sh | bash
+```
+
+or clone the repository and run `deploy/install-homelab.sh`. It makes a
+`sideline` user, a checkout and a virtualenv under `/srv/sideline`, and a
+systemd service (`deploy/sideline.service`) that serves the API and the
+review page on port 8000 of every interface, from boot. Run it again to
+update. Matches live in `/srv/sideline/data`, the layout
+`sideline ingest --data` writes, so a match processed on the GPU machine
+arrives with:
+
+```
+rsync -a --delete ./data/ sideline@<homelab>:/srv/sideline/data/
+```
+
+Review on the homelab's copy from then on; the verdicts are rows in its
+database. `SIDELINE_BRANCH=<branch>` before the script installs a branch
+instead of `main`.
 
 ## Layout
 
 ```
 sideline/
   contracts.py        tracks/events/registration Parquet schemas, match.json, player_stats.json
-  timeline.py         video time -> match seconds, via soccer-manager's periods and stints
-  sports/             the plugin boundary; soccer.py is the pitch model, entities, stat definitions
+  timeline.py         video time <-> match seconds, and the minutes app's taps, via soccer-manager's nodes
+  sports/             the plugin boundary; soccer.py is the pitch model, entities, stat definitions, restart rules
+  detection.py        S2's detector behind a protocol: an Ultralytics checkpoint, or a script for tests
+  tracking.py         S3's tracker: people by overlap or centre, the ball by where it went, no dependencies
+  events.py           dead balls from fragments: still, then struck or thrown, and who took it, in player heights
   registration/       S5: one interface, two implementations
     followcam.py        per-frame fit from painted lines (the PoC)
     static.py           clicked landmarks once per placement, homography or spline (the product)
@@ -71,11 +138,14 @@ sideline/
     synthetic.py        frames rendered through a known camera, for tests and the selftest
   storage/            blob store (local or MinIO) and the versioned artifact layout
   db/                 matches, jobs, stage runs, review decisions
-  stages/             s0_ingest, s1_sampling
-  api/                FastAPI
+  stages/             s0_ingest, s1_sampling, s2_detection, s3_tracking, s8_events
+  overlay.py          the sampled frames with tracks, the ball's path and each event's call, as an MP4
+  api/                FastAPI: uploads, artifacts, and the review page's routes
   worker/             RQ worker
   spike.py, cli.py    the M1 spike and the `sideline` command
+deploy/               install-homelab.sh and sideline.service: the API as a LAN service on the homelab
 docs/SPEC.md          the design, copied from the living doc
+web/                  the tagger (GitHub Pages) and review.html (served by the API on your network)
 hardware/             the static rig (M9): what to buy, the printed four-camera head or hidden pod, aim cards
 tests/                pytest; everything runs on a CPU with no services
 ```

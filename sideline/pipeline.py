@@ -11,7 +11,7 @@ from typing import Optional
 from sideline.config import Settings, build_blobs, build_engine, build_queue
 from sideline.db.models import Job, Match, StageRun
 from sideline.db.session import session_scope
-from sideline.stages import ORDER, STAGES, MatchRecord, StageContext
+from sideline.stages import DEFAULT_STAGES, ORDER, STAGES, MatchRecord, StageContext
 from sideline.storage.artifacts import ArtifactRef, ArtifactStore
 
 
@@ -19,7 +19,7 @@ def record_of(m: Match) -> MatchRecord:
     return MatchRecord(
         id=m.id, capture_mode=m.capture_mode, source_key=m.source_key, sport=m.sport,
         sm_match_id=m.sm_match_id, pitch_length=m.pitch_length, pitch_width=m.pitch_width,
-        kickoff_offset_ms=m.kickoff_offset_ms,
+        kickoff_offset_ms=m.kickoff_offset_ms, periods=m.periods,
     )
 
 
@@ -89,8 +89,9 @@ def enqueue_stages(settings: Settings, match_id: str, stages: list[str]) -> list
 
 def ingest_local(settings: Settings, video: Path, *, capture_mode: str = "followcam", sm_match_id: Optional[str] = None,
                  pitch: tuple[float, float] = (105.0, 68.0), kickoff_offset_ms: Optional[int] = None,
-                 stages: Optional[list[str]] = None) -> str:
-    """Register a video file as a match and run the stages inline."""
+                 stages: Optional[list[str]] = None, config: Optional[dict] = None) -> str:
+    """Register a video file as a match and run the stages inline. `config`
+    reaches every stage; each takes the keys it knows."""
     blobs = build_blobs(settings)
     engine = build_engine(settings)
     with session_scope(engine) as s:
@@ -102,6 +103,6 @@ def ingest_local(settings: Settings, video: Path, *, capture_mode: str = "follow
         blobs.put_file(m.source_key, video, "video/mp4")
         match_id = m.id
         rec = record_of(m)
-    for stage in stages or ORDER:
-        run_stage(settings, rec, stage)
+    for stage in DEFAULT_STAGES if stages is None else stages:
+        run_stage(settings, rec, stage, config)
     return match_id
