@@ -1,0 +1,29 @@
+# The Sideline API and review page, on the home network only.
+#
+# Installed by deploy/install-homelab.sh. It serves JSON artifacts and S1's
+# sampled frames to browsers on this network, so it binds every interface
+# of this machine and must never be forwarded to the internet or put behind
+# a public tunnel: Tailscale is the way in from outside.
+[Unit]
+Description=Sideline API and review page (LAN only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sideline
+Group=sideline
+WorkingDirectory=/srv/sideline/app
+Environment=SIDELINE_DATA_DIR=/srv/sideline/data
+Environment=SIDELINE_WEB_DIR=/srv/sideline/app/web
+ExecStart=/srv/sideline/venv/bin/sideline serve --host 0.0.0.0 --port 8000 --data /srv/sideline/data
+Restart=always
+RestartSec=3
+# Nothing it writes belongs outside its own data directory.
+ProtectSystem=strict
+ReadWritePaths=/srv/sideline/data
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

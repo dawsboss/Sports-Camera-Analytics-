@@ -97,6 +97,30 @@ tunnel (the spec's Cloudflare Tunnel option does not apply to this API).
 There is no login. The compose stack serves the same page at
 `:8000/review`.
 
+### On the homelab, as a service
+
+On a Debian or Ubuntu machine (a Proxmox LXC or VM), as root:
+
+```
+curl -fsSL https://raw.githubusercontent.com/dawsboss/Sports-Camera-Analytics-/main/deploy/install-homelab.sh | bash
+```
+
+or clone the repository and run `deploy/install-homelab.sh`. It makes a
+`sideline` user, a checkout and a virtualenv under `/srv/sideline`, and a
+systemd service (`deploy/sideline.service`) that serves the API and the
+review page on port 8000 of every interface, from boot. Run it again to
+update. Matches live in `/srv/sideline/data`, the layout
+`sideline ingest --data` writes, so a match processed on the GPU machine
+arrives with:
+
+```
+rsync -a --delete ./data/ sideline@<homelab>:/srv/sideline/data/
+```
+
+Review on the homelab's copy from then on; the verdicts are rows in its
+database. `SIDELINE_BRANCH=<branch>` before the script installs a branch
+instead of `main`.
+
 ## Layout
 
 ```
@@ -119,6 +143,7 @@ sideline/
   api/                FastAPI: uploads, artifacts, and the review page's routes
   worker/             RQ worker
   spike.py, cli.py    the M1 spike and the `sideline` command
+deploy/               install-homelab.sh and sideline.service: the API as a LAN service on the homelab
 docs/SPEC.md          the design, copied from the living doc
 web/                  the tagger (GitHub Pages) and review.html (served by the API on your network)
 hardware/             the static rig (M9): what to buy, the printed four-camera head or hidden pod, aim cards
