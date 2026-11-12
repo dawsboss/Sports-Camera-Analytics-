@@ -95,7 +95,8 @@ if [ "$GPU" = "1" ]; then
   fi
   echo
   echo "GPU as the worker sees it:"
-  sudo -u sideline HOME="$ROOT/data/home" "$ROOT/venv/bin/python" -c "import torch; print('  cuda available:', torch.cuda.is_available()); print('  device:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none; the worker will run on the CPU, slowly')"
+  # A minimal container has no sudo; runuser is in util-linux everywhere.
+  runuser -u sideline -- env HOME="$ROOT/data/home" "$ROOT/venv/bin/python" -c "import torch; print('  cuda available:', torch.cuda.is_available()); print('  device:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none; the worker will run on the CPU, slowly')"
 fi
 
 HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
