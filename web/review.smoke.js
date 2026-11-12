@@ -45,6 +45,23 @@ const { chromium } = require('playwright');
   }, null, { timeout: 5000 });
   const caption = await page.$eval('#caption', e => e.textContent);
   console.log('caption:', caption.trim().replace(/\s+/g, ' '));
+  // The kind chips: one per kind present plus "all", counts that add up,
+  // and a tap narrows the list to that kind and records it in the address.
+  const chips = await page.$$eval('#kinds .chip', els => els.map(e => ({ kind: e.dataset.kind, n: Number(e.querySelector('small').textContent) })));
+  if (chips.length) {
+    const total = chips.find(c => !c.kind).n, sum = chips.filter(c => c.kind).reduce((a, c) => a + c.n, 0);
+    if (total !== rows.length || sum !== total) throw new Error(`chip counts ${JSON.stringify(chips)} against ${rows.length} rows`);
+    const pick = chips.filter(c => c.kind).sort((a, b) => a.n - b.n)[0];
+    await page.click(`#kinds .chip[data-kind="${pick.kind}"]`);
+    await page.waitForFunction(n => document.querySelectorAll('#events .ev').length === n, pick.n);
+    const kinds = await page.$$eval('#events .ev .kind', els => [...new Set(els.map(e => e.textContent))]);
+    if (kinds.length !== 1 || kinds[0] !== pick.kind.replace('_', ' ')) throw new Error(`filtered to ${pick.kind} but the list shows ${kinds}`);
+    if (new URL(page.url()).searchParams.get('kind') !== pick.kind) throw new Error('the filter is not in the address');
+    if (!(await page.$('#events .ev.sel'))) throw new Error('nothing selected after filtering');
+    await page.click('#kinds .chip[data-kind=""]');
+    await page.waitForFunction(n => document.querySelectorAll('#events .ev').length === n, rows.length);
+    console.log('kind chips:', JSON.stringify(chips), 'filtered to', pick.kind, 'and back');
+  }
   // Step and play.
   await page.keyboard.press('ArrowRight');
   await page.click('#play');

@@ -106,7 +106,9 @@ A match opens into the review. The page plays the match at each
 event the pipeline wrote, draws the taker, the ball and every tracked
 box, and takes one of four taps: right; wrong kind; wrong taker, by
 tapping the right player; not an event. With a roster uploaded it also
-names the taker. Each tap is a row in the database (`event_decisions`,
+names the taker. The chips above the list narrow it to one kind of
+event (every throw-in, every unnamed restart), and `j`/`k` and the tap
+that follows a verdict then stay within that kind. Each tap is a row in the database (`event_decisions`,
 `review_decisions`), never an edit to an artifact, and
 `GET /matches/<id>/review/decisions` exports them. The frames the page
 shows are most of the footage at 5 fps and are served by this API to
