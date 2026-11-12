@@ -1,0 +1,35 @@
+# The Sideline worker: runs the queued jobs (ingest, sampling, detection,
+# tracking, restarts) in its own process beside the API, which only queues
+# them (SIDELINE_JOB_RUNNER=db on the API). It holds the detector and the
+# GPU; the API stays light. Installed by deploy/install-homelab.sh with
+# SIDELINE_GPU=1. Stop sends SIGTERM and the worker finishes the job in
+# hand first.
+[Unit]
+Description=Sideline worker (jobs from the database; GPU)
+After=network-online.target sideline.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sideline
+Group=sideline
+WorkingDirectory=/srv/sideline/data
+Environment=SIDELINE_DATA_DIR=/srv/sideline/data
+Environment=TMPDIR=/srv/sideline/data/work
+# Ultralytics writes its settings under HOME and downloads weights to the
+# working directory; both must be writable, and only the data tree is.
+Environment=HOME=/srv/sideline/data/home
+Environment=YOLO_CONFIG_DIR=/srv/sideline/data/home/.config/Ultralytics
+Environment=SIDELINE_DETECTOR_WEIGHTS=/srv/sideline/data/models/yolo11x.pt
+Environment=SIDELINE_DETECTOR_IMGSZ=1920
+ExecStart=/srv/sideline/venv/bin/sideline worker --data /srv/sideline/data
+Restart=always
+RestartSec=5
+TimeoutStopSec=1800
+ProtectSystem=strict
+ReadWritePaths=/srv/sideline/data
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

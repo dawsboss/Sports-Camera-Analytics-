@@ -153,9 +153,14 @@ def _serve(args: argparse.Namespace) -> int:
 
 
 def _worker(args: argparse.Namespace) -> int:
+    import logging
+
+    from sideline.config import Settings
     from sideline.worker import main as worker_main
 
-    return worker_main()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    settings = Settings.from_env(data_dir=Path(args.data)) if args.data else Settings.from_env()
+    return worker_main(settings, once=args.once, every_s=args.poll_seconds)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -226,7 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--data", default=None, help="a local data directory from `sideline ingest`, instead of the services")
     v.set_defaults(fn=_serve)
 
-    w = sub.add_parser("worker", help="run an RQ worker")
+    w = sub.add_parser("worker", help="run queued jobs: an RQ worker with Redis, else a poll of the database")
+    w.add_argument("--data", default=None, help="the data directory the API serves (database and blobs)")
+    w.add_argument("--once", action="store_true", help="run what is queued and exit")
+    w.add_argument("--poll-seconds", type=float, default=2.0)
     w.set_defaults(fn=_worker)
 
     args = p.parse_args(argv)

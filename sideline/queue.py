@@ -1,6 +1,8 @@
 """The job queue: Redis with RQ on the compose stack, a background thread
-for one machine serving the API with no Redis, or the same jobs run inline
-for tests and a terminal."""
+for one machine serving the API with no Redis, the database itself when a
+separate `sideline worker` process on the same machine polls it (the GPU
+worker beside the API), or the same jobs run inline for tests and a
+terminal."""
 
 from __future__ import annotations
 
@@ -92,3 +94,16 @@ class ThreadQueue:
     def wait(self, timeout: Optional[float] = None) -> bool:
         """Block until the queue has drained; for tests and shutdown."""
         return self.done.wait(timeout)
+
+
+class DbQueue:
+    """Nothing to do: the job row is the queue. A `sideline worker` process
+    on the same machine claims queued jobs in order and runs them, so the
+    API never carries the detector's memory or its GPU. Without a worker
+    running, jobs wait; the landing page shows them as waiting to start."""
+
+    def __init__(self, settings) -> None:
+        self.settings = settings
+
+    def enqueue(self, job_id: str, depends_on: Optional[str] = None) -> str:
+        return job_id

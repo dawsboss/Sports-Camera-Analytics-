@@ -141,6 +141,31 @@ Review on the homelab's copy from then on; the verdicts are rows in its
 database. `SIDELINE_BRANCH=<branch>` before the script installs a branch
 instead of `main`.
 
+### The GPU worker
+
+With a GPU in the container, the same machine does the detection too and
+the gaming PC drops out of the loop. Run the installer with
+`SIDELINE_GPU=1`. It installs torch from the CUDA 12.6 wheels (the last to
+support a Pascal card such as a GTX 1080; set `SIDELINE_TORCH_INDEX` for a
+newer card), the detector, and a second service, `sideline-worker`, which
+polls the database for queued jobs and runs them in its own process while
+the API only queues them. The worker holds the detector and the GPU; the
+API stays light. Tick "also find the players, the ball and the restarts
+here" when adding film, and the list shows detection running frame by
+frame.
+
+The container needs the card first. Share it at the host rather than
+passing it through: install the NVIDIA driver on the Proxmox host, then hand
+the devices to the container (`/dev/nvidia0`, `/dev/nvidiactl`,
+`/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset` as
+present, as `dev0:`.. entries on the container, or the older
+`lxc.cgroup2.devices.allow` and `lxc.mount.entry` lines) and install the
+same driver version's user-space libraries inside it. Any other container
+can mount the same devices and share the card; the driver time-slices it,
+and the eight gigabytes of memory are what they contend for. If another
+project needs the card by day, a systemd timer that starts
+`sideline-worker` at night is the whole scheduling policy.
+
 ## Layout
 
 ```

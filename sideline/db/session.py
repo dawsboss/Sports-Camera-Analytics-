@@ -19,6 +19,13 @@ def make_engine(url: str) -> Engine:
 
             kw["poolclass"] = StaticPool
     engine = create_engine(url, future=True, **kw)
+    if url.startswith("sqlite") and url not in ("sqlite://", "sqlite:///:memory:"):
+        # The API and a worker share this file. Write-ahead logging lets a
+        # reader proceed while the other writes, and the busy timeout makes
+        # a brief overlap a wait rather than an error.
+        with engine.begin() as conn:
+            conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            conn.exec_driver_sql("PRAGMA busy_timeout=5000")
     Base.metadata.create_all(engine)
     add_missing_columns(engine)
     return engine

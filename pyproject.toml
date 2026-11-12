@@ -39,6 +39,12 @@ eval = [
   "ultralytics>=8.2",
   "SoccerNet>=0.1.60",
 ]
+# The GPU worker on the homelab: the detector only. torch is installed
+# separately from the wheel index that matches the card and its driver
+# (deploy/install-homelab.sh does this), so it is not pinned here.
+gpu = [
+  "ultralytics>=8.2",
+]
 
 [project.scripts]
 sideline = "sideline.cli:main"

@@ -31,7 +31,7 @@ def run_stage(settings: Settings, match: MatchRecord, stage: str, config: Option
         raise KeyError(f"unknown stage {stage!r}; known: {ORDER}")
     blobs = build_blobs(settings)
     artifacts = ArtifactStore(blobs)
-    cfg = {"sample_fps": settings.sample_fps, "cache_frames": settings.cache_frames, **(config or {})}
+    cfg = {**settings.stage_defaults(), **(config or {})}
     ctx = StageContext(match=match, artifacts=artifacts, blobs=blobs, workdir=settings.workdir,
                        pipeline_version=settings.pipeline_version, config=cfg,
                        progress=progress or (lambda fraction, detail: None))
@@ -159,7 +159,7 @@ def run_job(settings: Settings, job_id: str) -> Optional[ArtifactRef]:
             raise KeyError(job_id)
         if job.status == "done":
             return None
-        job.status, job.started_at = "running", datetime.now(timezone.utc)
+        job.status, job.started_at = "running", datetime.now(timezone.utc)   # from queued, or claimed by a worker
         match = record_of(s.get(Match, job.match_id))
         stage = job.stage
     progress = job_progress(settings, job_id)

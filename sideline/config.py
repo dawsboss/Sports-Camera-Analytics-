@@ -25,11 +25,20 @@ class Settings:
     minio_secure: bool = False
     redis_url: Optional[str] = None
     inline_jobs: bool = True
-    # inline | thread | rq. Inline runs a job before the request returns,
+    # inline | thread | db | rq. Inline runs a job before the request returns,
     # which tests want; thread runs it in the background of the API's own
-    # process, which one machine serving a household wants; rq is the
-    # compose stack. Empty means: rq with Redis, else inline.
+    # process, which one machine with no GPU wants; db leaves it queued for a
+    # `sideline worker` process polling the same database, which is how the
+    # API stays light while a worker holds the GPU; rq is the compose stack.
+    # Empty means: rq with Redis, else inline.
     job_runner: str = ""
+    # The detector a worker runs S2 with. Empty weights mean the COCO
+    # default; a path points at a fine-tuned checkpoint. The device is
+    # Ultralytics' word for it ("0" for the first GPU, "cpu"), or empty to
+    # let it pick.
+    detector_weights: str = ""
+    detector_imgsz: int = 1920
+    detector_device: str = ""
     sample_fps: float = 5.0
     cache_frames: bool = True
     pipeline_version: str = "0.1.0"
@@ -51,9 +60,24 @@ class Settings:
             redis_url=redis_url,
             inline_jobs=env("SIDELINE_INLINE_JOBS", "1" if not redis_url else "0") == "1",
             job_runner=env("SIDELINE_JOB_RUNNER", ""),
+            detector_weights=env("SIDELINE_DETECTOR_WEIGHTS", ""),
+            detector_imgsz=int(env("SIDELINE_DETECTOR_IMGSZ", "1920")),
+            detector_device=env("SIDELINE_DETECTOR_DEVICE", ""),
             sample_fps=float(env("SIDELINE_SAMPLE_FPS", "5")),
             cache_frames=env("SIDELINE_CACHE_FRAMES", "1") == "1",
         )
+
+    def stage_defaults(self) -> dict:
+        """What every stage run gets before a caller's own config: the
+        sample rate, whether frames are cached, and the detector this
+        machine was told to use."""
+        cfg: dict = {"sample_fps": self.sample_fps, "cache_frames": self.cache_frames}
+        if self.detector_weights:
+            det: dict = {"weights": self.detector_weights, "imgsz": self.detector_imgsz}
+            if self.detector_device:
+                det["device"] = self.detector_device
+            cfg["detectors"] = [det]
+        return cfg
 
     @property
     def resolved_db_url(self) -> str:
@@ -101,7 +125,11 @@ _THREAD_QUEUES: dict[str, object] = {}
 def build_queue(settings: Settings):
     from sideline.queue import InlineQueue, RQQueue, ThreadQueue
 
+    from sideline.queue import DbQueue
+
     runner = settings.job_runner or ("rq" if settings.redis_url and not settings.inline_jobs else "inline")
+    if runner == "db":
+        return DbQueue(settings)
     if runner == "thread":
         key = str(settings.data_dir.resolve())
         if key not in _THREAD_QUEUES:
