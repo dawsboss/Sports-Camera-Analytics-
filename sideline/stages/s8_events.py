@@ -9,6 +9,12 @@ Each event carries the taker as a `track_id`. The name arrives as a review
 decision on that track, or from identity resolution, never by editing this
 file; a re-run after S6 fills `player_id` in a new version.
 
+Beside the restarts it writes `possession.json`: every spell of the ball
+with one fragment (`sideline/possession.py`), with how many samples had a
+ball in them at all. It is not in `events.parquet`: a spell has a start
+and an end and no event type of the sport's yet names it. A pass is one
+spell ending loose and a team-mate's beginning, which waits for teams.
+
 Beside the Parquet the stage writes `events.csv`, the same rows as a coach
 would write them down: the match clock, what happened, who, how sure. The
 clock comes through the timeline from the kickoff offset and the copied
@@ -33,6 +39,7 @@ from sideline.events import (
     frames_from_rows,
     merge_shifts,
 )
+from sideline.possession import find_possessions, possession_doc
 from sideline.sports import get_sport
 from sideline.stages.base import StageContext
 from sideline.storage.artifacts import ArtifactRef
@@ -67,7 +74,7 @@ def write_log(rows: list[dict], kickoff_offset_ms, periods) -> str:
 
 class EventsStage:
     name = "s8_events"
-    version = "0.2.0"
+    version = "0.3.0"
 
     def run(self, ctx: StageContext) -> ArtifactRef:
         m = ctx.match
@@ -125,6 +132,9 @@ class EventsStage:
                                max_gap_samples=int(ctx.config.get("max_gap_samples", 3)),
                                merge_s=float(ctx.config.get("merge_s", 2.0)), shifts=shifts)
 
+        spells = find_possessions(frames, grammar)
+        possession = possession_doc(frames, spells, m.capture_mode)
+
         events, log = [], []
         for obs in dead:
             call = sport.classify_restart(obs)
@@ -136,6 +146,7 @@ class EventsStage:
         ref = ctx.artifacts.new_version(m.id, self.name)
         ctx.artifacts.write_table(ref, "events.parquet", pa.Table.from_pylist(events, schema=EVENTS_SCHEMA))
         ctx.artifacts.write_json(ref, "dead_balls.json", log)
+        ctx.artifacts.write_json(ref, "possession.json", possession)
         csv_rows = [{**e, "reason": l["call"]["reason"]} for e, l in zip(events, log)]
         ctx.artifacts.write_bytes(ref, "events.csv",
                                   write_log(csv_rows, match.get("kickoff_offset_ms"), periods_from_sm(m.periods or {})).encode(),
@@ -146,13 +157,17 @@ class EventsStage:
                          "merge_s": float(ctx.config.get("merge_s", 2.0)),
                          "grammar": {k: getattr(grammar, k) for k in (
                              "dead_ball_min_s", "still_radius_h", "release_speed_h", "settled_s", "reach_h", "held_rel_y",
-                             "held_above_h", "near_h", "object_min_h")},
+                             "held_above_h", "near_h", "object_min_h", "touch_h", "strike_window_s",
+                             "possession_min_s", "possession_carry_s")},
                          "landmark_classes": landmark_classes},
             inputs=[i for i in (s3, s0, s5 if from_registration else None) if i is not None],
             capture_mode=m.capture_mode, stage_version=self.version,
-            pipeline_version=ctx.pipeline_version, outputs=["events.parquet", "events.csv", "dead_balls.json"],
+            pipeline_version=ctx.pipeline_version, outputs=["events.parquet", "events.csv", "dead_balls.json", "possession.json"],
             extra={"events": len(events), "events_by_type": dict(Counter(e["type"] for e in events)),
-                   "frames": len(frames), "camera_shifts_from_registration": from_registration,
+                   "frames": len(frames), "possession_spells": len(spells),
+                   "possession": {k: possession[k] for k in ("sample_count", "samples_with_ball",
+                                                             "samples_in_possession", "partial")},
+                   "camera_shifts_from_registration": from_registration,
                    "camera_shifts_from_people": max(0, len(frames) - 1 - from_registration)},
         )
         return ref

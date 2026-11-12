@@ -90,6 +90,12 @@ def test_detect_track_and_find_the_throw_in(tmp_path, clip):
     man = ctx.artifacts.read_manifest(s8)
     assert man["events_by_type"] == {"throw_in": 1} and man["inputs"][0] == s3.as_dict()
     assert man["capture_mode"] == "followcam"
+    # Possession beside the restarts: the thrower has it in her hands until
+    # she throws it, and the document says what it was counted over.
+    poss = json.loads(ctx.blobs.get(s8.key("possession.json")))
+    assert poss["capture_mode"] == "followcam" and poss["sample_count"] == 15 and poss["partial"] is False
+    assert [(p["track_id"], p["held"], p["end_ms"]) for p in poss["spells"]] == [(thrower, True, 7 * 200)]
+    assert man["possession_spells"] == 1 and "possession.json" in man["outputs"]
 
 
 def test_detection_needs_sampling_and_tracking_needs_detection(tmp_path, clip):

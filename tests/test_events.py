@@ -423,3 +423,44 @@ def test_a_landmark_in_frame_is_the_camera_motion_and_names_the_restart(soccer, 
     goal_frames = frames_from_rows(scene("goal", (380, 840)).rows, ["ball"], ["corner_flag", "goal"])
     d = find_dead_balls(goal_frames, grammar, SIZE)[0]
     assert "goal" in d.landmarks_h and soccer.classify_restart(d).type == "goal_kick"
+
+
+def test_the_taker_is_the_last_one_at_the_ball_not_whoever_stood_by_it(soccer, grammar):
+    # One player puts the ball down and waits a stride from it. The
+    # detector loses the ball at rest, another player runs up and strikes
+    # it, and it is next seen forty metres on. The camera pans throughout,
+    # so the spot the ball lay on has to be carried into the later frames.
+    s = Scene(pan=5.0)
+    others = [(300, 500), (1300, 520), (1500, 480)]
+    spot = (800, 700)
+    for k in range(22):
+        s.people(k, others)
+        s.people(k, [(spot[0] - 75, spot[1] + 4)], ids=[7])                    # stood by it while it sat
+        run = min(1.0, max(0.0, (k - 8) / 4))
+        s.people(k, [(spot[0] + 400 - (400 - 8) * run, spot[1] + 3)], ids=[9])    # arrives at sample 12
+        if k < 10:
+            s.ball(k, *spot)
+        elif k >= 14:
+            s.ball(k, spot[0] + 150 * (k - 12), spot[1] - 40)
+    (d,) = _dead(s, grammar)
+    assert d.taker_track == 9 and not d.held and d.release_speed_h is None
+
+    # With nobody running up, the one who stood nearest while it sat still takes it.
+    s.rows = [r for r in s.rows if r["track_id"] != 9]
+    (d,) = _dead(s, grammar)
+    assert d.taker_track == 7
+
+
+def test_whoever_crosses_the_spot_after_the_window_is_not_the_taker(grammar):
+    s = Scene()
+    spot = (800, 700)
+    late = int(grammar.strike_window_s * 1000 / DT) + 3
+    for k in range(10 + late + 6):
+        s.people(k, [(300, 500), (1300, 520), (1500, 480)])
+        s.people(k, [(spot[0] - 20, spot[1] + 4)], ids=[7])
+        if k >= 10 + late:
+            s.people(k, [(spot[0] + 6, spot[1] + 3)], ids=[9])
+        if k < 10:
+            s.ball(k, *spot)
+    (d,) = _dead(s, grammar)
+    assert d.taker_track == 7

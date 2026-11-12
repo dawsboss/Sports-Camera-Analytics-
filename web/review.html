@@ -136,7 +136,7 @@
       </span>
     </div>
     <div class="verdicts" style="padding-top:0;color:var(--muted);font-size:13px">
-      <kbd>j</kbd>/<kbd>k</kbd> next / previous event shown &nbsp; <kbd>←</kbd>/<kbd>→</kbd> step frames &nbsp; <kbd>space</kbd> play &nbsp; <kbd>[</kbd>/<kbd>]</kbd> longer clip &nbsp; <kbd>1</kbd> right &nbsp; <kbd>2</kbd>… what it was &nbsp; <kbd>0</kbd> not an event
+      <span style="color:#FFDC00">■</span> took this event &nbsp; <span style="color:#5BE37D">■</span> has the ball now &nbsp; <kbd>j</kbd>/<kbd>k</kbd> next / previous event shown &nbsp; <kbd>←</kbd>/<kbd>→</kbd> step frames &nbsp; <kbd>space</kbd> play &nbsp; <kbd>[</kbd>/<kbd>]</kbd> longer clip &nbsp; <kbd>1</kbd> right &nbsp; <kbd>2</kbd>… what it was &nbsp; <kbd>0</kbd> not an event
     </div>
   </main>
 </div>
@@ -446,9 +446,17 @@
         continue;
       }
       const isTaker = b.track_id === taker;
-      ctx.strokeStyle = kind === 'landmark' ? '#E07BFF' : isTaker ? '#FFDC00' : '#7FA3B8';
-      ctx.lineWidth = isTaker ? lw * 3 : lw;
+      // Yellow is who took this event, the same player on every frame of
+      // the clip. Green is who has the ball in this frame, and moves with
+      // it; on the taker it is drawn inside the yellow so both show.
+      const hasBall = kind === 'person' && f.has_ball != null && b.track_id === f.has_ball;
+      ctx.strokeStyle = kind === 'landmark' ? '#E07BFF' : isTaker ? '#FFDC00' : hasBall ? '#5BE37D' : '#7FA3B8';
+      ctx.lineWidth = isTaker || hasBall ? lw * 3 : lw;
       ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+      if (isTaker && hasBall) {
+        ctx.strokeStyle = '#5BE37D';
+        ctx.strokeRect(b.x1 + lw * 3, b.y1 + lw * 3, b.x2 - b.x1 - lw * 6, b.y2 - b.y1 - lw * 6);
+      }
       ctx.fillStyle = ctx.strokeStyle; ctx.font = `${Math.max(11, W / 110)}px ${getComputedStyle(document.body).fontFamily}`;
       ctx.fillText(kind === 'landmark' ? b.cls : String(b.track_id), b.x1, Math.max(12, b.y1 - 4));
     }

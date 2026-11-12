@@ -28,6 +28,7 @@ from sideline.config import Settings, build_blobs, build_engine
 from sideline.db.models import EventDecision, Job, Match, ReviewDecision, StageRun
 from sideline.db.session import session_scope
 from sideline.pipeline import FETCH, enqueue_stages
+from sideline.possession import holders
 from sideline.sports import get_sport
 from sideline.stages import DEFAULT_STAGES, ORDER
 from sideline.stages.s8_events import clock
@@ -531,10 +532,19 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 boxes[r["frame_index"]].append({k: r[k] for k in ("track_id", "cls", "x1", "y1", "x2", "y2", "conf")})
         plugin = get_sport(request.app.state.sport_of(match_id))
         kinds = {c.name: ("object" if c.object else "landmark" if c.landmark else "person") for c in plugin.entity_classes()}
+        # Who had the ball in each sample, from the latest events version
+        # that wrote spells and was built on the fragments drawn here: a
+        # track id means nothing against another tracking version.
+        has_ball: list[Optional[int]] = [None] * len(window)
+        s8 = _latest_complete(store, match_id, "s8_events")
+        if (s8 is not None and s3 is not None and store.blobs.exists(s8.key("possession.json"))
+                and _tracks_version_of(store.read_manifest(s8)) == s3.version):
+            has_ball = holders(store.read_json(s8, "possession.json")["spells"], [f["t_ms"] for f in window])
         return {
             "frames": [{"frame_index": f["frame_index"], "t_ms": f["t_ms"], "cached": f["key"] is not None,
-                        "url": f"/matches/{match_id}/frames/{f['frame_index']}.jpg", "boxes": boxes[f["frame_index"]]}
-                       for f in window],
+                        "url": f"/matches/{match_id}/frames/{f['frame_index']}.jpg", "boxes": boxes[f["frame_index"]],
+                        "has_ball": h}
+                       for f, h in zip(window, has_ball)],
             "kinds": kinds,
         }
 

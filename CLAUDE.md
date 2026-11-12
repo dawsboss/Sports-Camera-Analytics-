@@ -215,6 +215,25 @@ what surrounded it in heights of the taker, never in metres or pixels.
   box tags. Until a detector does, the plugin says `restart` there, not a
   guess. A landmark seen in two frames is also the exact camera motion,
   which the people estimate only approximates.
+- **Possession and the taker rule are built and have not met real
+  footage.** S8 0.3.0 writes `possession.json` beside the events: spells
+  of the ball with one fragment (`sideline/possession.py`), a touch being
+  the ball within `touch_h` of a player's feet or, failing any feet, in
+  her hands; a spell carries across `possession_carry_s` of free or unseen
+  ball and is not ended by a run shorter than `possession_min_s`. The
+  review page draws the holder in green on every frame, beside the yellow
+  taker, which is one player for the whole clip.
+  - The taker of a grounded dead ball is now the last player with her feet
+    at the spot, looked for up to `strike_window_s` after the ball was last
+    seen there (`last_at_the_ball`), because the owner found the yellow box
+    on players who touched the ball and did not take it (12 November; no
+    `wrong_taker` verdict had been recorded, so there is no count). Whether
+    the ball was dead is still decided by who was near while it sat.
+  - All three constants are priors. The measure is an image distance: a
+    low camera compresses depth, so a player a few metres nearer the camera
+    than the ball can be as close in the frame as the one on it. Registration
+    is what removes that. No verdict exists for a spell yet, and no team,
+    so there is no possession share.
 - **No open-play events yet** (passes, crosses, turnovers). A cross without
   pitch coordinates is a long aerial ball ending near the goal landmark;
   it needs the ball held through flight, which is the blackout tail, and

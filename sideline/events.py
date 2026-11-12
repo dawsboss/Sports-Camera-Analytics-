@@ -192,6 +192,65 @@ def local_height(frame: Frame, at: np.ndarray, default: float) -> float:
     return best[1] if best is not None else default
 
 
+def control_gap_h(person: Box, at: np.ndarray, object_size: Optional[float], grammar: EventGrammar,
+                  hands: bool = True) -> Optional[float]:
+    """How far the object is from being at this person, in her heights: 0
+    in her hands, else the distance from her feet. None where it cannot be
+    hers at all.
+
+    The box gap the cues use is 0 anywhere inside the box, so everyone
+    standing behind the ball in the image is as near as the player with her
+    foot on it. The feet are where a grounded ball is played, and a player
+    further from the camera has hers higher in the image than the ball.
+    That is still an image distance: a low camera compresses depth, and two
+    players a few metres apart along the line of sight are close here.
+    Registration is what removes that; this is the measure for frames it
+    has not placed, and the nearest player wins rather than everyone within
+    reach."""
+    if person.height <= 0:
+        return None
+    if object_size is not None and object_size < grammar.object_min_h * person.height:
+        return None                      # well behind her, only lined up with her in the image
+    rel_y = (at[1] - person.y1) / person.height
+    if hands and person.x1 <= at[0] <= person.x2 and -grammar.held_above_h <= rel_y <= grammar.held_rel_y:
+        return 0.0
+    dx = max(person.x1 - at[0], 0.0, at[0] - person.x2)
+    return float(np.hypot(dx, at[1] - person.y2)) / person.height
+
+
+def last_at_the_ball(frames: Sequence[Frame], idx: list[int], i: int, last: int, j: int, n: int, stab: np.ndarray,
+                     cum: np.ndarray, grammar: EventGrammar, tid: int, lookback: int = 4) -> Optional[Box]:
+    """The last person to have her feet at a grounded dead ball: over the
+    final still samples and on for `strike_window_s` after the ball was
+    last seen there, or until it is seen somewhere else.
+
+    Whoever stood nearest while the ball sat is often the one who fetched
+    it or put it down. The one who takes it runs up at the end, and the
+    detector has usually lost the ball by then, so she is looked for at the
+    spot the ball lay on, carried into later frames by the camera's motion.
+    None when nobody came within a touch, and the nearest-while-still vote
+    stands."""
+    spot = np.mean(stab[i:last + 1], axis=0)
+    end = frames[idx[last]]
+    size = next(b for b in end.objects if b.track_id == tid).size
+    until = idx[j] if j < n else len(frames) - 1
+    found: Optional[Box] = None
+    for fi in range(idx[max(i, last - lookback)], min(until, len(frames) - 1) + 1):
+        f = frames[fi]
+        if f.t_ms - end.t_ms > grammar.strike_window_s * 1000:
+            break
+        seen = next((b for b in f.objects if b.track_id == tid), None) if fi <= idx[last] else None
+        at = seen.centre if seen is not None else spot + cum[fi]
+        best: Optional[tuple[float, Box]] = None
+        for p in f.people:
+            g = control_gap_h(p, at, seen.size if seen is not None else size, grammar, hands=False)
+            if g is not None and (best is None or g < best[0]):
+                best = (g, p)
+        if best is not None and best[0] <= grammar.touch_h:
+            found = best[1]
+    return found
+
+
 def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: tuple[int, int],
                     period_starts_ms: Sequence[int] = (), max_gap_samples: int = 3,
                     merge_s: float = 2.0, shifts: Optional[Sequence[np.ndarray]] = None,
@@ -258,7 +317,7 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
             still_s = (frames[idx[last]].t_ms - frames[idx[i]].t_ms) / 1000.0
             if still_s >= grammar.dead_ball_min_s:
                 cand = self_contained(frames, idx, i, last, j, n, stab, heights, grammar, tid, (W, H), period_starts_ms,
-                                      max_gap_samples)
+                                      max_gap_samples, cum)
                 if cand is not None:
                     raw.append(cand)
             i = j if j > i + 1 else i + 1
@@ -298,7 +357,8 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
 
 def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j: int, n: int, stab: np.ndarray,
                    heights: list[float], grammar: EventGrammar, tid: int, size: tuple[int, int],
-                   period_starts_ms: Sequence[int], max_gap_samples: int = 3) -> Optional[Candidate]:
+                   period_starts_ms: Sequence[int], max_gap_samples: int = 3,
+                   cum: Optional[np.ndarray] = None) -> Optional[Candidate]:
     """Measure one still window: how it ended, who took it, what was around.
     Returns None when the window ended without a release the rules can use."""
     W, H = size
@@ -370,6 +430,12 @@ def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j
     held = taker_id is not None and held_votes >= max(1, len(window) / 2)
     if speed is None and taker_id is None:
         return None
+    # Whether this was a dead ball is settled above, by who was near while
+    # it sat. Who took a grounded one is whoever was last at it, which is
+    # often not the same player. A ball in the hands stays with its holder.
+    late = last_at_the_ball(frames, idx, i, last, j, n, stab, cum, grammar, tid) if cum is not None and not held else None
+    if late is not None:
+        taker_id = late.track_id
 
     # Context at the last still sample.
     ball = next(b for b in end_frame.objects if b.track_id == tid).centre
@@ -397,7 +463,8 @@ def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j
             period, since = pi, (t_ms - s) / 1000.0
     obs = dict(
         t_ms=int(t_ms), still_s=float((end_frame.t_ms - frames[idx[i]].t_ms) / 1000.0),
-        taker_track=taker_id, taker_cls=taker.cls if taker is not None else (boxes_by_frame[max(boxes_by_frame)].cls if boxes_by_frame else None),
+        taker_track=taker_id, taker_cls=(late.cls if late is not None else taker.cls if taker is not None
+                                         else boxes_by_frame[max(boxes_by_frame)].cls if boxes_by_frame else None),
         taker_team=None, held=bool(held), ball_rel_y=float(np.median(rel_ys)) if rel_ys else None,
         ball_u=float(ball[0] / W), ball_v=float(ball[1] / H), n_visible=len(others), nearest_h=nearest_h,
         n_near=n_near, extreme_h=extreme_h, landmarks_h=landmarks_h, release_speed_h=speed,

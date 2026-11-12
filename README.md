@@ -183,6 +183,7 @@ sideline/
   detection.py        S2's detector behind a protocol: an Ultralytics checkpoint, or a script for tests
   tracking.py         S3's tracker: people by overlap or centre, the ball by where it went, no dependencies
   events.py           dead balls from fragments: still, then struck or thrown, and who took it, in player heights
+  possession.py       who has the ball in each sample: feet or hands within a touch, spells that survive a missed sample
   registration/       S5: one interface, two implementations
     followcam.py        per-frame fit from painted lines (the PoC)
     static.py           clicked landmarks once per placement, homography or spline (the product)

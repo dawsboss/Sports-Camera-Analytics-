@@ -117,6 +117,9 @@ class EventGrammar:
     held_above_h: float              # and may sit this far above the box top and still be in hand
     near_h: float                    # other players within this of the ball count as close
     object_min_h: float              # an object smaller than this share of a person's height is behind her, not at her
+    touch_h: float                   # the ball this close to a player's feet, or in her hands, is at her
+    strike_window_s: float           # a still ball lost from sight is taken by whoever reaches the spot within this long
+    possession_carry_s: float        # the ball may run free or go unseen this long and still be hers if she is next at it
 
 
 @dataclass(frozen=True)

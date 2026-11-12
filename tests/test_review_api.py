@@ -52,6 +52,9 @@ def test_frames_around_a_moment_carry_their_boxes_and_the_jpegs_are_served(revie
     kinds = {b["cls"] for b in f["boxes"]}
     assert kinds == {"player", "ball"} and len(f["boxes"]) == 5
     assert body["kinds"]["ball"] == "object" and body["kinds"]["player"] == "person" and body["kinds"]["goal"] == "landmark"
+    # Who has the ball in each sample: the thrower until she lets go at 1600.
+    thrower = c.get(f"/matches/{match_id}/review").json()["events"][0]["taker_track"]
+    assert [fr["has_ball"] for fr in body["frames"]] == [thrower, thrower, None, None, None]
     img = c.get(f["url"])
     assert img.status_code == 200 and img.headers["content-type"] == "image/jpeg" and img.content[:2] == b"\xff\xd8"
     assert c.get(f"/matches/{match_id}/frames/999.jpg").status_code == 404

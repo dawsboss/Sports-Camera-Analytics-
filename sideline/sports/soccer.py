@@ -244,6 +244,20 @@ class SoccerPlugin:
             # marks on the far fence, taken for a ball at the head or feet
             # of whoever stood in front of them, measured 0.05 to 0.08.
             object_min_h=0.09,
+            # A metre, in heights of a 1.7 m player: the heights form of
+            # `touch_radius_m`, for frames nobody has registered.
+            touch_h=0.6,
+            # The first full match saw the release on the next sample at
+            # 33 of 317 windows: the ball at rest is lost before it is
+            # struck, and whoever stood by it while it sat is often the one
+            # who put it down, not the one who ran up. Two seconds is a
+            # run-up; much longer and the people estimate of the camera's
+            # motion has drifted off the spot. A prior, like the rest.
+            strike_window_s=2.0,
+            # A dribbled ball runs a stride or two ahead between touches,
+            # and the detector misses one or two samples at a time on
+            # either real match (worst run 15, which this does not bridge).
+            possession_carry_s=1.5,
         )
 
     def stat_definitions(self) -> Sequence[StatDefinition]:
