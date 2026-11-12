@@ -24,7 +24,7 @@
   button.on { outline: 2px solid var(--flag); }
   select, input { font: inherit; color: inherit; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
   .app { height: 100%; display: grid; grid-template-columns: 300px 1fr; }
-  @media (max-width: 820px) { .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } .list { max-height: 36vh; } }
+  @media (max-width: 820px) { .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } .list { max-height: 44vh; } .scrub { flex-wrap: wrap; } .scrub .t { min-width: 0; flex-basis: 100%; text-align: left; } }
   .list { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
   .list header { padding: 14px 14px 8px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .list header small { color: var(--muted); font-weight: 400; }
@@ -44,6 +44,12 @@
   .badge.right { color: var(--ok); border-color: var(--ok); }
   .badge.wrong_type, .badge.wrong_taker { color: var(--flag); border-color: var(--flag); }
   .badge.not_event { color: var(--muted); text-decoration: line-through; }
+  .badge.carried { border-style: dashed; }
+  /* The kind buttons wrap with the other verdict buttons, as items of the same row. */
+  .kindbtns { display: contents; }
+  .kindbtns button { padding: 8px 10px; }
+  .kindbtns button.on { outline: 2px solid var(--sky); }
+  .kindbtns kbd { margin-right: 5px; }
   .stage { display: flex; flex-direction: column; min-width: 0; }
   .frame { position: relative; background: #000; flex: 1; min-height: 240px; display: flex; align-items: center; justify-content: center; }
   canvas { max-width: 100%; max-height: 100%; display: block; }
@@ -53,7 +59,7 @@
   .caption .conf { font-family: var(--mono); color: var(--sky); }
   .hint { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 12px; background: rgba(242,96,60,.85); color: #fff; font-weight: 600; }
   .scrub { display: flex; gap: 10px; align-items: center; padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--line); }
-  .scrub input[type=range] { flex: 1; }
+  .scrub input[type=range] { flex: 1; min-width: 60px; }
   .scrub .t { font-family: var(--mono); color: var(--muted); min-width: 110px; text-align: right; }
   .verdicts { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 12px 14px; background: var(--panel); align-items: center; }
   .verdicts .sp { flex: 1; }
@@ -112,13 +118,14 @@
     </div>
     <div class="scrub">
       <button id="play" title="space">▶</button>
+      <button id="earlier" title="[  five seconds more before">◀ 5 s</button>
       <input type="range" id="scrubber" min="0" max="0" value="0" step="1">
+      <button id="later" title="]  five seconds more after">5 s ▶</button>
       <span class="t" id="time"></span>
     </div>
     <div class="verdicts">
       <button class="primary" id="right" title="1">✓ Right</button>
-      <select id="kind"></select>
-      <button id="wrongkind">Wrong kind</button>
+      <span class="kindbtns" id="kindbtns"></span>
       <button id="wrongtaker" title="click a box">Wrong taker</button>
       <button class="danger" id="notevent" title="0">Not an event</button>
       <span class="sp"></span>
@@ -129,7 +136,7 @@
       </span>
     </div>
     <div class="verdicts" style="padding-top:0;color:var(--muted);font-size:13px">
-      <kbd>j</kbd>/<kbd>k</kbd> next / previous event shown &nbsp; <kbd>←</kbd>/<kbd>→</kbd> step frames &nbsp; <kbd>space</kbd> play &nbsp; <kbd>1</kbd> right &nbsp; <kbd>0</kbd> not an event
+      <kbd>j</kbd>/<kbd>k</kbd> next / previous event shown &nbsp; <kbd>←</kbd>/<kbd>→</kbd> step frames &nbsp; <kbd>space</kbd> play &nbsp; <kbd>[</kbd>/<kbd>]</kbd> longer clip &nbsp; <kbd>1</kbd> right &nbsp; <kbd>2</kbd>… what it was &nbsp; <kbd>0</kbd> not an event
     </div>
   </main>
 </div>
@@ -327,7 +334,9 @@
     const el = $('events'); el.innerHTML = '';
     const evs = state.doc.events;
     const vis = evs.filter(shown);
-    $('count').textContent = `${vis.filter(e => e.decision).length}/${vis.length} reviewed`;
+    const own = vis.filter(e => e.decision && !e.decision.carried_from).length;
+    const carried = vis.filter(e => e.decision && e.decision.carried_from).length;
+    $('count').textContent = `${own}/${vis.length} reviewed` + (carried ? ` · ${carried} carried` : '');
     $('matchid').textContent = matchId.slice(0, 8);
     if (!evs.length) { fail('No events in this match yet. Run s8_events first.'); return; }
     renderKinds();
@@ -338,7 +347,9 @@
       const row = document.createElement('div');
       row.className = 'ev' + (i === state.i ? ' sel' : '');
       row.dataset.i = i;
-      const badge = e.decision ? `<span class="badge ${esc(e.decision.verdict)}">${esc(e.decision.verdict.replace('_', ' '))}</span>` : `<span class="badge">${esc(e.confidence)}</span>`;
+      // A verdict given on an earlier run of the events and read through this one is drawn dashed.
+      const from = e.decision && e.decision.carried_from;
+      const badge = e.decision ? `<span class="badge ${esc(e.decision.verdict)}${from ? ' carried' : ''}"${from ? ` title="carried from events v${esc(from.events_version)}"` : ''}>${esc(e.decision.verdict.replace('_', ' '))}</span>` : `<span class="badge">${esc(e.confidence)}</span>`;
       row.innerHTML = `<span class="clock">${esc(e.clock)}</span><span><div class="kind">${esc(kindOf(e).replace('_', ' '))}</div><div class="who">${esc(who(e))}</div></span>${badge}`;
       row.addEventListener('click', () => select(i));
       el.appendChild(row);
@@ -354,7 +365,10 @@
     state.i = i;
     const e = state.doc.events[i];
     renderList();
-    const data = await api(`/matches/${matchId}/review/frames?t_ms=${e.t_ms}&span_s=4`);
+    // Four seconds before the release and eight after. The time of an
+    // event is when the ball was last seen at rest, and the kick or the
+    // throw can come seconds later: a clip centred on it cut that off.
+    const data = await api(`/matches/${matchId}/review/frames?t_ms=${e.t_ms + 2000}&span_s=6`);
     // Walking the list with j outruns the frames: an answer for an event
     // that is no longer the selected one must not draw over the one that is.
     if (state.i !== i) return;
@@ -363,8 +377,9 @@
     let best = 0;
     state.frames.forEach((f, k) => { if (Math.abs(f.t_ms - e.t_ms) < Math.abs(state.frames[best].t_ms - e.t_ms)) best = k; });
     $('scrubber').max = Math.max(0, state.frames.length - 1);
-    state.frames.forEach(f => { if (f.cached) { const im = new Image(); im.src = f.url; im.onload = () => { if (state.frames[state.f] === f) draw(); }; state.images.set(f.frame_index, im); } });
+    load(state.frames, e.t_ms);
     showFrame(best);
+    document.querySelectorAll('#kindbtns button').forEach(b => b.classList.toggle('on', b.dataset.kind === kindOf(e)));
     $('caption').hidden = false;
     $('caption').innerHTML = `<span>${esc(e.clock)}</span><b>${esc(kindOf(e).replace('_', ' ').toUpperCase())}</b><span>${esc(who(e))}</span><span class="conf">${esc(e.confidence)}</span><span class="why">${esc(e.reason)}</span>`;
     const roster = state.doc.roster || {};
@@ -374,6 +389,34 @@
       $('roster').innerHTML = ids.map(id => `<option value="${esc(id)}">${roster[id].number != null ? '#' + esc(roster[id].number) + ' ' : ''}${esc(roster[id].name || id)}</option>`).join('');
     }
     state.pickTaker = false; $('hint').hidden = true; $('wrongtaker').classList.remove('on');
+  }
+
+  // Frames are fetched nearest the event first, so the moment itself can
+  // be stepped through while the ends of the clip are still arriving.
+  function load(frames, around) {
+    [...frames].sort((a, b) => Math.abs(a.t_ms - around) - Math.abs(b.t_ms - around)).forEach(f => {
+      if (!f.cached || state.images.has(f.frame_index)) return;
+      const im = new Image(); im.src = f.url;
+      im.onload = () => { if (state.frames[state.f] === f) draw(); };
+      state.images.set(f.frame_index, im);
+    });
+  }
+  // Five more seconds before or after, for the restart that takes its time.
+  async function extend(dir) {
+    const i = state.i, e = state.doc && state.doc.events[i];
+    if (!e || !state.frames.length) return;
+    const edge = dir < 0 ? state.frames[0].t_ms : state.frames[state.frames.length - 1].t_ms;
+    const data = await api(`/matches/${matchId}/review/frames?t_ms=${edge + dir * 2600}&span_s=2.5`);
+    if (state.i !== i) return;
+    const have = new Set(state.frames.map(f => f.frame_index));
+    const add = data.frames.filter(f => !have.has(f.frame_index));
+    if (!add.length) return;
+    const cur = state.frames[state.f];
+    state.frames = state.frames.concat(add).sort((a, b) => a.t_ms - b.t_ms);
+    $('scrubber').max = state.frames.length - 1;
+    load(add, edge);
+    // Earlier frames keep the place; later ones are what was asked to be seen, so step onto the first.
+    showFrame(dir < 0 ? state.frames.indexOf(cur) : state.frames.indexOf(add[0]));
   }
 
   function showFrame(k) {
@@ -424,14 +467,21 @@
     const e = state.doc.events[state.i]; if (!e) return;
     const body = { events_version: state.doc.events_version, t_ms: e.t_ms, verdict, decided_by: by(), ...extra };
     const d = await api(`/matches/${matchId}/review/decisions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    e.decision = { verdict: d.verdict, corrected_type: d.corrected_type, corrected_track: d.corrected_track, decided_by: d.decided_by, decided_at: d.decided_at };
+    e.decision = { verdict: d.verdict, corrected_type: d.corrected_type, corrected_track: d.corrected_track, decided_by: d.decided_by, decided_at: d.decided_at, carried_from: null };
     renderList();
     const next = state.doc.events.findIndex((x, k) => k > state.i && !x.decision && shown(x));
     if (next >= 0) select(next); else draw();
   }
   $('right').addEventListener('click', () => decide('right'));
   $('notevent').addEventListener('click', () => decide('not_event'));
-  $('wrongkind').addEventListener('click', () => decide('wrong_type', { corrected_type: $('kind').value }));
+  // Naming what it was is one tap or one digit. The same name the
+  // pipeline gave is "right"; any other is a corrected kind.
+  function name(kind) {
+    const e = state.doc.events[state.i]; if (!e) return;
+    if (kind === e.type) decide('right'); else decide('wrong_type', { corrected_type: kind });
+  }
+  $('earlier').addEventListener('click', () => { stop(); extend(-1); });
+  $('later').addEventListener('click', () => { stop(); extend(1); });
   $('wrongtaker').addEventListener('click', () => { state.pickTaker = !state.pickTaker; $('hint').hidden = !state.pickTaker; $('wrongtaker').classList.toggle('on', state.pickTaker); });
   canvas.addEventListener('click', ev => {
     if (!state.pickTaker) return;
@@ -466,13 +516,22 @@
     else if (ev.key === 'ArrowRight') { stop(); showFrame(state.f + 1); }
     else if (ev.key === 'ArrowLeft') { stop(); showFrame(state.f - 1); }
     else if (ev.key === ' ') { ev.preventDefault(); state.playing ? stop() : play(); }
+    else if (ev.key === '[') { stop(); extend(-1); }
+    else if (ev.key === ']') { stop(); extend(1); }
+    else if (ev.key >= '2' && ev.key <= '9' && state.doc && state.doc.event_types[Number(ev.key) - 2]) name(state.doc.event_types[Number(ev.key) - 2]);
     else if (ev.key === '1') decide('right');
     else if (ev.key === '0') decide('not_event');
   });
 
   api(`/matches/${matchId}/review`).then(doc => {
     state.doc = doc;
-    $('kind').innerHTML = doc.event_types.map(t => `<option value="${esc(t)}">${esc(t.replace('_', ' '))}</option>`).join('');
+    doc.event_types.forEach((t, k) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.dataset.kind = t;
+      b.innerHTML = (k < 8 ? `<kbd>${k + 2}</kbd>` : '') + esc(t.replace('_', ' '));
+      b.addEventListener('click', () => name(t));
+      $('kindbtns').appendChild(b);
+    });
     renderList();
     const first = firstShown();
     if (first >= 0) select(first);

@@ -104,11 +104,16 @@ all on the serving machine instead, when that machine has the model.
 
 A match opens into the review. The page plays the match at each
 event the pipeline wrote, draws the taker, the ball and every tracked
-box, and takes one of four taps: right; wrong kind; wrong taker, by
-tapping the right player; not an event. With a roster uploaded it also
+box, and takes one of four taps: right; what it was instead, one
+button or digit per kind; wrong taker, by tapping the right player; not
+an event. The clip runs from four seconds before the release to eight
+after, and `[` and `]` add five seconds at either end. With a roster uploaded it also
 names the taker. The chips above the list narrow it to one kind of
 event (every throw-in, every unnamed restart), and `j`/`k` and the tap
-that follows a verdict then stay within that kind. Each tap is a row in the database (`event_decisions`,
+that follows a verdict then stay within that kind. After a re-run of
+the events the verdicts given on the earlier version are shown on the
+new one, dashed, wherever the same moment is still an event; they stay
+rows of the version they were given on. Each tap is a row in the database (`event_decisions`,
 `review_decisions`), never an edit to an artifact, and
 `GET /matches/<id>/review/decisions` exports them. The frames the page
 shows are most of the footage at 5 fps and are served by this API to
