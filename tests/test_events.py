@@ -19,9 +19,9 @@ def row(k, tid, cls, x, y, w, h):
             "x1": x - w / 2, "y1": y - h, "x2": x + w / 2, "y2": y, "conf": 0.8}
 
 
-def ball_row(k, tid, x, y):
+def ball_row(k, tid, x, y, r=5):
     return {"frame_index": k, "t_ms": k * DT, "track_id": tid, "cls": "ball",
-            "x1": x - 5, "y1": y - 5, "x2": x + 5, "y2": y + 5, "conf": 0.4}
+            "x1": x - r, "y1": y - r, "x2": x + r, "y2": y + r, "conf": 0.4}
 
 
 class Scene:
@@ -40,8 +40,8 @@ class Scene:
             tid = (ids[i] if ids else 1 + i)
             self.rows.append(row(k, tid, cls, x + self.shift(k), y, 24, H))
 
-    def ball(self, k, x, y, tid=50):
-        self.rows.append(ball_row(k, tid, x + self.shift(k), y))
+    def ball(self, k, x, y, tid=50, r=5):
+        self.rows.append(ball_row(k, tid, x + self.shift(k), y, r))
 
 
 @pytest.fixture
@@ -126,17 +126,27 @@ def test_lone_taker_with_everyone_beyond_the_ball_is_a_corner_when_roles_are_kno
 
 
 def test_free_kick_has_players_around_the_ball(soccer, grammar):
-    s = Scene()
-    for k in range(20):
-        s.people(k, [(700, 600), (760, 610), (820, 605), (1000, 500), (1300, 520)])   # a wall and two more
-        s.people(k, [(560, 640)], ids=[9])
-        if k < 10:
-            s.ball(k, 600, 650)
-        else:
-            s.ball(k, 600 + 100 * (k - 9), 650 - 40 * (k - 9))
-    d = _dead(s, grammar)[0]
-    assert d.n_near >= 2
-    assert soccer.classify_restart(d).type == "free_kick"
+    def scene(still):
+        s = Scene()
+        for k in range(still + 10):
+            s.people(k, [(700, 600), (760, 610), (820, 605), (1000, 500), (1300, 520)])   # a wall and two more
+            s.people(k, [(560, 640)], ids=[9])
+            if k < still:
+                s.ball(k, 600, 650)
+            else:
+                s.ball(k, 600 + 100 * (k - still + 1), 650 - 40 * (k - still + 1))
+        return s
+    d = _dead(scene(21), grammar)[0]                       # put down and left for 4 s
+    assert d.n_near >= 2 and d.still_s == pytest.approx(4.0)
+    # A dead ball the plugin is sure of and will not name: among players it
+    # is a free kick or a throw-in not yet picked up, and nothing here says
+    # which. A reviewer names it; the reason tells her what was seen.
+    call = soccer.classify_restart(d)
+    assert call.type == "restart" and call.confidence >= 0.7 and "free kick" in call.reason
+    # The same ball among the same players after only a second's pause was
+    # open play more often than not on real footage, and the call says so.
+    brief = soccer.classify_restart(_dead(scene(7), grammar)[0])
+    assert brief.type == "restart" and brief.confidence < 0.5 and "open play" in brief.reason
 
 
 def test_first_dead_ball_of_the_period_is_the_kick_off_and_the_next_is_not(soccer, grammar):
@@ -152,7 +162,8 @@ def test_first_dead_ball_of_the_period_is_the_kick_off_and_the_next_is_not(socce
             s.ball(k, 960 + 80 * (k - 44), 650)
     dead = _dead(s, grammar, period_starts_ms=[0])
     assert [d.first_in_period for d in dead] == [True, False]
-    assert [soccer.classify_restart(d).type for d in dead] == ["kick_off", "free_kick"]
+    # The second has nobody close around it and nothing in view to name it.
+    assert [soccer.classify_restart(d).type for d in dead] == ["kick_off", "restart"]
     # Without a timeline nothing is a kick-off.
     assert all(not d.first_in_period for d in _dead(s, grammar))
 
@@ -165,6 +176,134 @@ def test_a_ball_that_drifts_off_or_is_carried_is_not_a_restart(grammar):
         # Still for two seconds, then dribbled away at a walk: no release.
         s.ball(k, 960 + (0 if k < 10 else 8 * (k - 9)), 650)
     assert _dead(s, grammar) == []
+
+
+def test_a_ball_missed_for_two_samples_is_judged_by_where_it_turned_up(grammar):
+    """The detector misses the ball for a sample or two far more often than
+    it sees a release, so a gap is not a strike. Seen again a step away, the
+    ball drifted; seen again far off, it was struck, and the speed across
+    the gap says so."""
+    def scene(reappears_at):
+        s = Scene()
+        for k in range(24):
+            s.people(k, [(700, 600), (1200, 600)])
+            s.people(k, [(950, 640)], ids=[9])
+            if k < 10:
+                s.ball(k, 960, 650)
+            elif k >= 12:
+                s.ball(k, reappears_at + 8 * (k - 12), 650)   # then rolls on at a walk
+        return s
+    assert _dead(scene(1000), grammar) == []                # 0.7 heights in 0.6 s: a drift
+    struck = _dead(scene(1260), grammar)                    # 5 heights in 0.6 s
+    assert len(struck) == 1
+    d = struck[0]
+    assert d.t_ms == 10 * DT and d.release_speed_h == pytest.approx(300 / H / 0.6) and d.taker_track == 9
+
+
+def test_a_ball_unseen_for_seconds_and_found_where_it_was_is_one_dead_ball(grammar):
+    """The detector loses a ball at rest for seconds at a time. Found in
+    the same place, it never left: one dead ball, still since it first came
+    to rest, timed when it is finally played. Reviewed on the first full
+    match, treating the gap as an ending lost a goal kick, a free kick and
+    two throw-ins, or reported them seconds before anything happened."""
+    def scene(first_rest):
+        s = Scene()
+        for k in range(40):
+            s.people(k, [(700, 600), (1200, 600)])
+            s.people(k, [(950, 640)], ids=[9])
+            if k < first_rest or 18 <= k < 28:
+                s.ball(k, 960, 650)                          # still, lost, still there
+            elif k >= 28:
+                s.ball(k, 960 + 90 * (k - 27), 650)
+        return s
+    dead = _dead(scene(8), grammar)
+    assert len(dead) == 1 and dead[0].t_ms == 28 * DT and dead[0].release_speed_h is not None
+    assert dead[0].still_s == pytest.approx(5.4)
+    # Two sightings before it had sat a second are not a ball at rest: the
+    # gap is not bridged, and only what was seen afterwards counts.
+    short = _dead(scene(3), grammar)
+    assert len(short) == 1 and short[0].still_s == pytest.approx(1.8)
+
+
+def test_a_ball_that_sat_for_seconds_is_dead_however_slowly_it_leaves(grammar):
+    """A free kick rolled a step to a team-mate leaves no faster than a
+    dribble. After two seconds at rest that is a drift and no restart; after
+    `settled_s` the ball was dead whatever became of it."""
+    def scene(still):
+        s = Scene()
+        for k in range(still + 12):
+            s.people(k, [(700, 600), (1200, 600)])
+            s.people(k, [(950, 640)], ids=[9])
+            s.ball(k, 960 + (0 if k < still else 8 * (k - still + 1)), 650)
+        return s
+    assert _dead(scene(10), grammar) == []
+    settled = _dead(scene(int(grammar.settled_s * 5) + 2), grammar)
+    assert len(settled) == 1 and settled[0].release_speed_h < grammar.release_speed_h
+
+
+def test_nothing_before_the_first_whistle_is_an_event(grammar):
+    """Balls are put down and struck all through the warm-up. With the
+    period starts known, a dead ball well before the first of them is not
+    reported; one a few seconds early still is, because the whistle time is
+    typed by hand."""
+    s = Scene()
+    for k in range(120):
+        s.people(k, [(700, 600), (1200, 600)])
+        s.people(k, [(950, 640)], ids=[9])
+        if k < 10 or 80 <= k < 95:
+            s.ball(k, 960, 650)
+        elif k < 20:
+            s.ball(k, 960 + 90 * (k - 9), 650)
+        elif k >= 95:
+            s.ball(k, 960 + 90 * (k - 94), 650)
+    assert [d.t_ms for d in _dead(s, grammar)] == [10 * DT, 95 * DT]
+    assert [d.t_ms for d in _dead(s, grammar, period_starts_ms=[20_000])] == [95 * DT]
+    assert [d.t_ms for d in _dead(s, grammar, period_starts_ms=[5_000])] == [10 * DT, 95 * DT]
+
+
+def test_a_ball_back_at_rest_with_the_same_taker_was_never_released(soccer, grammar):
+    """A thrower brings the ball from overhead to her chest and holds it
+    there before throwing. The quick move between the two reads as a
+    release; the ball coming to rest again in the same hands says it was
+    not. One throw-in, timed at the throw, dead since she first held it."""
+    s = Scene()
+    thrower = (400, 700)
+    for k in range(30):
+        s.people(k, [(600, 500), (800, 520), (1000, 480), (1300, 560)])
+        s.people(k, [thrower], ids=[9])
+        if k < 8:
+            s.ball(k, 400, 700 - H - 16)                     # overhead
+        elif k < 21:
+            s.ball(k, 400, 700 - H + 24)                     # at her chest, 0.67 heights lower one sample later
+        else:
+            s.ball(k, 400 + 80 * (k - 20), 700 - H + 24 - 30 * (k - 20))
+    dead = _dead(s, grammar)
+    assert len(dead) == 1
+    d = dead[0]
+    assert d.t_ms == 21 * DT and d.taker_track == 9 and d.held and d.still_s == pytest.approx(4.0)
+    assert soccer.classify_restart(d).type == "throw_in"
+    # With the merge switched off the two holds are two throw-ins.
+    frames = frames_from_rows(s.rows, ["ball"])
+    assert len(find_dead_balls(frames, grammar, SIZE, same_taker_s=0.0)) == 2
+
+
+def test_a_small_object_behind_a_player_is_not_in_her_hands(grammar):
+    """A mark on the far fence that the detector takes for a ball sits at the
+    head of whoever stands in front of it. It is too small to be a ball at
+    her distance, so she is not its taker, and with nobody at it a ball that
+    merely vanishes is not a restart."""
+    def scene(r):
+        s = Scene()
+        for k in range(20):
+            s.people(k, [(700, 600), (1200, 600), (900, 500)])
+            s.people(k, [(400, 700)], ids=[9])
+            if k < 12:
+                s.ball(k, 400, 700 - H + 6, r=r)             # at her head, then gone
+        return s
+    assert grammar.object_min_h * H > 4
+    assert _dead(scene(2), grammar) == []                    # 4 px across beside a 60 px player
+    held = _dead(scene(5), grammar)                          # a real ball there is in her hands
+    assert len(held) == 1 and held[0].held and held[0].taker_track == 9
 
 
 def test_a_spare_ball_on_the_touchline_near_nobody_is_ignored(grammar):

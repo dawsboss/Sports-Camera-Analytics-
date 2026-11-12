@@ -51,6 +51,11 @@ class Box:
     def centre(self) -> np.ndarray:
         return np.array([(self.x1 + self.x2) / 2, (self.y1 + self.y2) / 2])
 
+    @property
+    def size(self) -> float:
+        """The longer side, which for a ball is its diameter however it blurs."""
+        return max(self.x2 - self.x1, self.y2 - self.y1)
+
     def gap_to(self, p: np.ndarray) -> float:
         """Pixel distance from a point to the box; 0 inside it."""
         dx = max(self.x1 - p[0], 0.0, p[0] - self.x2)
@@ -74,6 +79,7 @@ class Candidate:
 
     obs: dict
     period: Optional[int]
+    start_ms: int = 0           # when the ball came to rest
 
 
 def frames_from_rows(rows: Iterable[dict], object_classes: Iterable[str],
@@ -188,11 +194,23 @@ def local_height(frame: Frame, at: np.ndarray, default: float) -> float:
 
 def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: tuple[int, int],
                     period_starts_ms: Sequence[int] = (), max_gap_samples: int = 3,
-                    merge_s: float = 2.0, shifts: Optional[Sequence[np.ndarray]] = None) -> list[DeadBall]:
+                    merge_s: float = 2.0, shifts: Optional[Sequence[np.ndarray]] = None,
+                    same_taker_s: float = 2.0, early_s: float = 5.0) -> list[DeadBall]:
     """Every moment the ball sat still long enough and was then put back into
     play, with what was visible around it. One per restart after merging.
     `shifts` is the camera's motion between consecutive frames; without it
-    the people estimate is used."""
+    the people estimate is used.
+
+    A ball that is back at rest with the same taker within `same_taker_s`
+    of a release was never released: she shifted her grip, or stepped along
+    the line with it. Those windows are one dead ball, timed at the last
+    release and still since the first rest. Two seconds is too short for a
+    ball to be played, returned and settled, which is the case that must
+    stay two events.
+
+    With period starts known, a ball dead more than `early_s` before the
+    first of them is the warm-up, not the match, and is not reported. The
+    margin is for a whistle time typed by hand."""
     if not frames:
         return []
     W, H = frame_size
@@ -222,7 +240,15 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
         while i < n - 1:
             pts = [stab[i]]
             j = i + 1
-            while j < n and idx[j] - idx[j - 1] <= max_gap_samples:
+            while j < n:
+                if (idx[j] - idx[j - 1] > max_gap_samples
+                        and (frames[idx[j - 1]].t_ms - frames[idx[i]].t_ms) / 1000.0 < grammar.dead_ball_min_s):
+                    # Unseen for longer than a miss or two, before it had
+                    # sat long enough to be dead: two sightings a second
+                    # apart are not a ball at rest. Once it has sat that
+                    # long, finding it in the same place after any gap is
+                    # the best evidence there is that it never left.
+                    break
                 mean = np.mean(pts, axis=0)
                 if np.linalg.norm(stab[j] - mean) > grammar.still_radius_h * heights[j]:
                     break
@@ -231,17 +257,33 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
             last = j - 1
             still_s = (frames[idx[last]].t_ms - frames[idx[i]].t_ms) / 1000.0
             if still_s >= grammar.dead_ball_min_s:
-                cand = self_contained(frames, idx, i, last, j, n, stab, heights, grammar, tid, (W, H), period_starts_ms)
+                cand = self_contained(frames, idx, i, last, j, n, stab, heights, grammar, tid, (W, H), period_starts_ms,
+                                      max_gap_samples)
                 if cand is not None:
                     raw.append(cand)
             i = j if j > i + 1 else i + 1
 
     raw.sort(key=lambda c: c.obs["t_ms"])
     kept: list[Candidate] = []
+    first_start = min(period_starts_ms) if len(period_starts_ms) else None
     for c in raw:
-        if kept and c.obs["t_ms"] - kept[-1].obs["t_ms"] < merge_s * 1000:
-            if c.obs["still_s"] > kept[-1].obs["still_s"]:
+        if first_start is not None and c.obs["t_ms"] < first_start - early_s * 1000:
+            continue
+        prev = kept[-1] if kept else None
+        if prev is not None and c.obs["t_ms"] - prev.obs["t_ms"] < merge_s * 1000:
+            if c.obs["still_s"] > prev.obs["still_s"]:
                 kept[-1] = c
+            continue
+        if (prev is not None and prev.obs["taker_track"] is not None
+                and c.obs["taker_track"] == prev.obs["taker_track"]
+                and c.start_ms - prev.obs["t_ms"] < same_taker_s * 1000):
+            # Back at rest with the same taker: the earlier window did not
+            # end in a release. The later one says when the ball left; the
+            # earlier one says since when it had been dead and in whose hands.
+            c.obs["still_s"] = float(c.obs["still_s"] + (c.start_ms - prev.start_ms) / 1000.0)
+            c.obs["held"] = bool(c.obs["held"] or prev.obs["held"])
+            c.start_ms = prev.start_ms
+            kept[-1] = c
             continue
         kept.append(c)
     seen_periods: set[int] = set()
@@ -256,27 +298,39 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
 
 def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j: int, n: int, stab: np.ndarray,
                    heights: list[float], grammar: EventGrammar, tid: int, size: tuple[int, int],
-                   period_starts_ms: Sequence[int]) -> Optional[Candidate]:
+                   period_starts_ms: Sequence[int], max_gap_samples: int = 3) -> Optional[Candidate]:
     """Measure one still window: how it ended, who took it, what was around.
     Returns None when the window ended without a release the rules can use."""
     W, H = size
     end_frame = frames[idx[last]]
-    speed: Optional[float]
-    if j < n and idx[j] - idx[j - 1] <= 1:
+    speed: Optional[float] = None
+    step = frames[idx[last]].t_ms - frames[idx[last - 1]].t_ms if last > i else 200
+    t_ms = end_frame.t_ms + step
+    if j < n:
+        # The same fragment was seen again, so where the ball went is known.
         dt = (frames[idx[j]].t_ms - end_frame.t_ms) / 1000.0
         if dt <= 0:
             return None
-        speed = float(np.linalg.norm(stab[j] - stab[last])) / heights[j] / dt
-        if speed < grammar.release_speed_h:
-            return None                      # it drifted off, nobody struck it
-        t_ms = frames[idx[j]].t_ms
-    else:
-        # The ball vanished straight after sitting still: struck too hard to
-        # see, or carried out of frame. A restart with a lower confidence,
-        # provided someone was there to take it.
-        speed = None
-        step = frames[idx[last]].t_ms - frames[idx[last - 1]].t_ms if last > i else 200
-        t_ms = end_frame.t_ms + step
+        moved = float(np.linalg.norm(stab[j] - stab[last])) / heights[j]
+        if idx[j] - idx[j - 1] <= max_gap_samples:
+            # Seen again within the gap stillness is carried across. A miss
+            # of a sample or two is the ordinary case, not the struck one:
+            # the first full match saw the release on the very next sample
+            # at 33 of 317 windows. The average speed over the gap is a
+            # floor on the speed it left at, and the same test applies.
+            speed = moved / dt
+            sat_s = (end_frame.t_ms - frames[idx[i]].t_ms) / 1000.0
+            if speed < grammar.release_speed_h and sat_s < grammar.settled_s:
+                return None                  # it drifted off, nobody struck it
+            # A ball that sat for `settled_s` was dead however it left: a
+            # restart taken short, rolled a step to a team-mate, leaves no
+            # faster than a dribble. The slow speed is reported as it was.
+            t_ms = frames[idx[last] + 1].t_ms
+        # Otherwise it was unseen for longer and turned up elsewhere: put
+        # back into play at a speed nobody saw, like the vanished ball below.
+    # With no speed the ball vanished after sitting still: struck too hard
+    # to see, or carried out of frame. A restart with a lower confidence,
+    # provided someone was there to take it.
 
     # The taker: whoever was nearest the ball over the last samples of the
     # window, and whether the ball sat high in her box (in hand) meanwhile.
@@ -289,6 +343,10 @@ def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j
         best = None
         for p in f.people:
             if p.height <= 0:
+                continue
+            if ball.size < grammar.object_min_h * p.height:
+                # Too small for her to be at it: the object is well behind
+                # her and only lines up with her in the image.
                 continue
             d = p.gap_to(ball.centre) / p.height
             if best is None or d < best[0]:
@@ -345,4 +403,4 @@ def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j
         n_near=n_near, extreme_h=extreme_h, landmarks_h=landmarks_h, release_speed_h=speed,
         since_period_start_s=since,
     )
-    return Candidate(obs=obs, period=period)
+    return Candidate(obs=obs, period=period, start_ms=int(frames[idx[i]].t_ms))

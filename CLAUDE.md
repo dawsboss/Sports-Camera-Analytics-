@@ -168,10 +168,40 @@ what surrounded it in heights of the taker, never in metres or pixels.
 - **Pitch dimensions are assumed, not known.** The search runs with
   105 x 68 and both real pitches are smaller. The upload carries them;
   nobody has measured either field.
-- **S2, S3 and the events half of S8 exist but have not met real footage.**
-  Detection is an Ultralytics checkpoint behind `Detector`; tracking is a
-  dependency-free two-pass tracker; `events.py` finds dead balls and the
-  soccer plugin names them. All of it is tested on scripted scenes only.
+- **S2, S3 and the events half of S8 have met one real match. They find
+  dead balls passably and cannot name a grounded one.** Detection is an
+  Ultralytics checkpoint behind `Detector`; tracking is a dependency-free
+  two-pass tracker; `events.py` finds dead balls and the soccer plugin
+  names them. On the first full follow-cam match (8 November, 24,658
+  samples) S8 0.1.0 wrote 317 events, 295 of them `free_kick`. The owner
+  reviewed the first 18 minutes: 64 verdicts, 36 not an event, 25 wrong
+  kind, 3 right. The 28 real ones were 9 throw-ins, 7 goal kicks, 5
+  kick-offs, 4 free kicks, 2 unnamed restarts and a corner.
+  - S8 0.2.0 writes 249 events on the same fragments: 239 `restart`, 9
+    `throw_in`, 1 `kick_off`. Read through his verdicts it keeps 26 of
+    the 28 real marks (the other two were second sightings of restarts it
+    keeps) and 14 of the 36 false ones. Twelve of the 22 it drops were
+    the warm-up before the whistle.
+  - **No cue a `DeadBall` carries separates a throw-in waiting to be
+    picked up from a free kick from a goal kick** (the account is in
+    `SoccerPlugin.classify_restart`). The name is where on the pitch the
+    ball lay, so it waits for the goal and the touchline: the landmark
+    detector or registration. Until then a grounded dead ball is
+    `restart`, with a confidence set by how long it sat (10 of 12 real at
+    three seconds, 9 of 19 at one).
+  - The false ones left are open play in which the ball keeps pace with
+    the players, which the people estimate of the camera's motion
+    cancels. Measured against the background instead (phase correlation
+    of consecutive S1 frames, people blanked, half a height), 21 of his
+    28 real marks stay still and 7 of the 24 false ones after the
+    whistle do. Worth building, in registration; not the clean cut a
+    first sample checked by eye suggested (12 of 14 against 2 of 14).
+  - The detector sees a ball at rest and then loses it far more often
+    than it sees it struck (33 of 317 windows saw the next sample), so
+    an event's time is when the ball was last seen still, and the kick
+    can be seconds later. The review clip runs on eight seconds for that.
+
+  Scripted scenes are still what the tests pin.
   The confidences in `SoccerPlugin.classify_restart` are priors until
   `spike/evals/restarts_on_taps.py` has run on both Veo exports against
   the minutes app's taps. Only detection is a trained model (a COCO
@@ -190,17 +220,20 @@ what surrounded it in heights of the taker, never in metres or pixels.
   it needs the ball held through flight, which is the blackout tail, and
   the goal detector above. `sideline overlay` renders what the stages saw
   so a run can be watched.
-- **The review page is for events only and the verdicts are not read back
-  yet.** `web/review.html`, served by the API at `/review` with a
+- **The review page is for events only, and the verdicts are read back
+  only by the page itself.** `web/review.html`, served by the API at `/review` with a
   same-origin content policy, writes `EventDecision` rows (right / wrong
   kind / wrong taker / not an event, each checked against a real events
   version, an event in it, the sport's event types and a track of the
   tracking version it was built on) and `ReviewDecision` rows for a
-  track's name, scoped to that tracking version. Nothing consumes them:
-  the scorer still reads only the minutes app's taps, S6 does not exist,
-  and a new events version starts with no verdicts. Replaying them by time
-  onto a new version, and scoring against them, is the next step. There
-  is no login; `decided_by` is whatever the reviewer typed.
+  track's name, scoped to that tracking version. A new events version has
+  no rows of its own; the page reads the earlier versions' verdicts
+  through it by time and shows them as carried (`sideline/verdicts.py`),
+  and the rows stay with the version they were given on. Nothing else
+  consumes them: the scorer still reads only the minutes app's taps and
+  S6 does not exist. Scoring a run against the verdicts was done by hand
+  for S8 0.2.0 and belongs in `spike/evals` beside `restarts_on_taps.py`.
+  There is no login; `decided_by` is whatever the reviewer typed.
 - No S4 team assignment, S6 identity, S8 stats or S9 publish; S7 review
   exists for events only. `contracts.py` already defines what they write.
   Events carry the taker as a `track_id`; the name arrives as a review

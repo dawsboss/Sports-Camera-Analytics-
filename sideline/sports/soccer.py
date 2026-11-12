@@ -33,6 +33,15 @@ RESTART_TYPES: tuple[str, ...] = (
     "throw_in", "corner", "goal_kick", "free_kick", "kick_off", "keeper_claim", "restart",
 )
 
+# How long a grounded ball sat says how sure the rules are that play had
+# stopped, and nothing about which restart it was. The owner reviewed the
+# first 18 minutes of the first full match (8 November, 64 verdicts on S8
+# 0.1.0, read through these rules' events): of the grounded dead balls
+# his verdicts cover, 10 of the 12 that had sat three seconds were real,
+# 3 of the 5 that had sat two, and 9 of the 19 that had only paused.
+PLACED_MIN_S = 2.0
+SETTLED_S = 3.0
+
 
 @dataclass(frozen=True)
 class PitchModel:
@@ -219,10 +228,22 @@ class SoccerPlugin:
             dead_ball_min_s=1.0,
             still_radius_h=0.5,
             release_speed_h=2.5,
+            # Reviewed on the first full match (S8 0.1.0): after the first
+            # whistle one of the 24 events marked "not an event" was a ball
+            # that had sat three seconds, and eight of the 28 marked real
+            # were. A free kick rolled a step sideways after sitting six
+            # seconds was one the speed test alone threw away.
+            settled_s=SETTLED_S,
             reach_h=1.5,
             held_rel_y=0.45,
             held_above_h=0.3,
             near_h=3.0,
+            # A ball is 0.22 m: 0.13 of a 1.7 m player, 0.16 of a 1.4 m one.
+            # On the first full match the ball at real restarts measured
+            # 0.11 to 0.22 of the taker; a cone behind the touchline and
+            # marks on the far fence, taken for a ball at the head or feet
+            # of whoever stood in front of them, measured 0.05 to 0.08.
+            object_min_h=0.09,
         )
 
     def stat_definitions(self) -> Sequence[StatDefinition]:
@@ -240,9 +261,19 @@ class SoccerPlugin:
         kick-off. What is left is a grounded ball taken by an outfield
         player with no flag or goal in sight: alone, with everyone else
         beyond the ball, that is a corner (or a goal kick where the detector
-        cannot tell a keeper from a player, and the call says so); among
-        other players it is a free kick. The confidences are priors, to be
-        set by measurement against the minutes app's taps, not tuned here.
+        cannot tell a keeper from a player, and the call says so).
+
+        Everything else is a `restart`: a dead ball the rules saw and will
+        not name. The first full match is why. The old last branch called
+        every such ball a free kick, 295 of 317 events; of the 28 the owner
+        marked as real, four were named rightly. Every cue a `DeadBall`
+        carries was then set against those 28: none separates a throw-in
+        waiting to be picked up from a free kick from a goal kick, and
+        "placed and left among players" was a free kick 2 times in 12. What
+        separates them is where on the pitch the ball lay, which needs the
+        touchline and the goal: registration, or the landmark detector. So
+        the confidence here says how sure it is that play had stopped, the
+        reason says what was around the ball, and the name waits.
         """
         keeper = obs.taker_cls == "goalkeeper"
         if obs.held:
@@ -268,6 +299,10 @@ class SoccerPlugin:
             if obs.roles_known:
                 return RestartCall("corner", 0.6, "taker alone with every other player beyond the ball")
             return RestartCall("restart", 0.5, "corner or goal kick; no keeper class to tell them apart")
-        if obs.n_near >= 2:
-            return RestartCall("free_kick", 0.6, "grounded ball with players close around it")
-        return RestartCall("free_kick", 0.4, "grounded ball taken by an outfield player")
+        around = ("players close around it, as at a free kick or a throw-in not yet picked up" if obs.n_near >= 2
+                  else "room around the taker, as at a goal kick or a corner")
+        if obs.still_s >= SETTLED_S:
+            return RestartCall("restart", 0.7, f"ball left on the ground for {obs.still_s:.0f} s; {around}")
+        if obs.still_s >= PLACED_MIN_S:
+            return RestartCall("restart", 0.5, f"ball put down for {obs.still_s:.0f} s; {around}")
+        return RestartCall("restart", 0.3, f"ball paused for a second; {around}; may be open play")

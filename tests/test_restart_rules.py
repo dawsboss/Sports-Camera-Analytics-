@@ -45,11 +45,21 @@ def test_alone_with_everyone_beyond_the_ball_is_a_corner_only_when_keepers_are_t
     assert call.type == "restart" and "goal kick" in call.reason
 
 
-def test_grounded_ball_among_players_is_a_free_kick():
+def test_a_grounded_ball_is_not_named_and_how_long_it_sat_says_how_sure():
+    """Nothing a DeadBall carries tells a throw-in waiting to be picked up
+    from a free kick from a goal kick: reviewed on the first full match, the
+    old guess "free kick" was right for 4 of 28 real restarts. The plugin
+    says `restart`, says what was around the ball, and is surer the longer
+    the ball sat."""
     soccer = get_sport("soccer")
-    wall = soccer.classify_restart(_obs(n_near=4))
-    spread = soccer.classify_restart(_obs(n_near=0, nearest_h=2.5, extreme_h=-1.0))
-    assert wall.type == spread.type == "free_kick" and wall.confidence > spread.confidence
+    left = soccer.classify_restart(_obs(n_near=4, still_s=6.0))
+    put = soccer.classify_restart(_obs(n_near=4, still_s=2.2))
+    paused = soccer.classify_restart(_obs(n_near=4, still_s=1.2))
+    assert left.type == put.type == paused.type == "restart"
+    assert left.confidence > put.confidence > paused.confidence and "open play" in paused.reason
+    assert "free kick" in left.reason and "throw-in" in left.reason
+    room = soccer.classify_restart(_obs(n_near=0, nearest_h=2.5, extreme_h=-1.0, still_s=6.0))
+    assert room.type == "restart" and "goal kick" in room.reason and room.confidence == left.confidence
 
 
 def test_nobody_within_reach_is_an_unnamed_restart():
@@ -62,7 +72,8 @@ def test_grammar_lists_the_restart_types_as_event_types():
     g = soccer.event_grammar(soccer.surface(105, 68))
     assert {"throw_in", "corner", "goal_kick", "free_kick", "kick_off", "keeper_claim", "restart"} <= set(g.event_types)
     assert set(g.restart_types) <= set(g.event_types) and "touch" in g.event_types
-    assert g.dead_ball_min_s > 0 and g.release_speed_h > 0
+    assert g.dead_ball_min_s > 0 and g.release_speed_h > 0 and 0 < g.object_min_h < 0.13
+    assert g.settled_s > g.dead_ball_min_s
 
 
 def test_the_flag_names_a_corner_and_the_goal_a_goal_kick_whatever_the_detector_calls_the_taker():

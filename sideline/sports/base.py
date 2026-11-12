@@ -111,10 +111,12 @@ class EventGrammar:
     dead_ball_min_s: float           # the ball must sit still at least this long
     still_radius_h: float            # within this many heights of one spot
     release_speed_h: float           # then move at least this fast, heights per second
+    settled_s: float                 # unless it sat this long, which no ball in open play does
     reach_h: float                   # a taker is a player within this of the ball
     held_rel_y: float                # a ball above this fraction of the taker's box is in hand
     held_above_h: float              # and may sit this far above the box top and still be in hand
     near_h: float                    # other players within this of the ball count as close
+    object_min_h: float              # an object smaller than this share of a person's height is behind her, not at her
 
 
 @dataclass(frozen=True)

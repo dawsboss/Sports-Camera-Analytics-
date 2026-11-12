@@ -67,7 +67,7 @@ def write_log(rows: list[dict], kickoff_offset_ms, periods) -> str:
 
 class EventsStage:
     name = "s8_events"
-    version = "0.1.0"
+    version = "0.2.0"
 
     def run(self, ctx: StageContext) -> ArtifactRef:
         m = ctx.match
@@ -145,8 +145,8 @@ class EventsStage:
                          "max_gap_samples": int(ctx.config.get("max_gap_samples", 3)),
                          "merge_s": float(ctx.config.get("merge_s", 2.0)),
                          "grammar": {k: getattr(grammar, k) for k in (
-                             "dead_ball_min_s", "still_radius_h", "release_speed_h", "reach_h", "held_rel_y",
-                             "held_above_h", "near_h")},
+                             "dead_ball_min_s", "still_radius_h", "release_speed_h", "settled_s", "reach_h", "held_rel_y",
+                             "held_above_h", "near_h", "object_min_h")},
                          "landmark_classes": landmark_classes},
             inputs=[i for i in (s3, s0, s5 if from_registration else None) if i is not None],
             capture_mode=m.capture_mode, stage_version=self.version,
