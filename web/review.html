@@ -63,6 +63,7 @@
   .add progress { width: 100%; height: 8px; }
   .add .err { color: var(--bad); font-size: 13px; }
   .status { font-size: 12px; color: var(--muted); }
+  .ev .act { font-size: 12px; padding: 4px 8px; }
   .status.failed { color: var(--bad); }
   .status.ready { color: var(--ok); }
   kbd { font-family: var(--mono); font-size: 12px; background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--muted); }
@@ -169,10 +170,15 @@
       const queued = jobs.find(j => j.status === 'queued');
       if (queued) return { cls: 'busy', text: `waiting to start: ${STAGE_WORDS[queued.stage] || queued.stage}` };
       const a = m.artifacts || {};
-      if (a.s8_events && a.s8_events.length) return { cls: 'ready', text: `ready to review · events v${Math.max(...a.s8_events)}` };
-      if (a.s1_sampling && a.s1_sampling.length) return { cls: '', text: 'sampled; needs detection on the GPU machine (sideline run)' };
+      if (a.s8_events && a.s8_events.length) return { cls: 'ready', text: `ready to review · events v${Math.max(...a.s8_events)}`, canRun: true };
+      if (a.s1_sampling && a.s1_sampling.length) return { cls: '', text: 'sampled; detection not run yet', canRun: true };
       if (!jobs.length && !m.source_url) return { cls: '', text: 'waiting for its video' };
       return { cls: '', text: 'nothing run yet' };
+    }
+    async function runHere(id, label) {
+      const r = await fetch(`/matches/${encodeURIComponent(id)}/jobs`, { method: 'POST' });
+      if (!r.ok) { alert(`${label} did not start: ${r.status} ${(await r.text()).slice(0, 200)}`); return; }
+      refresh().catch(() => {});
     }
     const gb = n => `${(n / 1e9).toFixed(2)} GB`;
     let timer = null;
@@ -191,6 +197,16 @@
         const a = document.createElement('a');
         a.className = 'ev'; a.href = `/review?match=${encodeURIComponent(m.id)}`;
         a.innerHTML = `<span class="clock">${esc(m.id.slice(0, 6))}</span><span><div class="kind">${esc(m.original_filename || m.id)}</div><div class="status ${esc(st.cls)}">${esc(m.capture_mode)} · ${esc(st.text)}</div></span><span class="badge">${st.cls === 'ready' ? 'review' : 'open'}</span>`;
+        if (st.canRun && st.cls !== 'busy') {
+          // Detection, tracking and restarts on this server; a re-run makes
+          // new versions and never touches the old ones.
+          const b = document.createElement('button');
+          b.className = 'act'; b.type = 'button';
+          b.textContent = st.cls === 'ready' ? 'Run detection again' : 'Run detection here';
+          b.title = 'Find the players, the ball and the restarts on this server (needs the worker and its GPU; slow without)';
+          b.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); b.disabled = true; runHere(m.id, b.textContent); });
+          a.querySelector('span:nth-child(2)').appendChild(b);
+        }
         el.appendChild(a);
       }
       clearTimeout(timer);

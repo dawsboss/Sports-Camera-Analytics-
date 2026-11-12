@@ -340,6 +340,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         with session_scope(request.app.state.engine) as s:
             return _match_out(s.get(Match, match_id), store)
 
+    @app.post("/matches/{match_id}/jobs", response_model=MatchOut, status_code=201)
+    def queue_stages(match_id: str, request: Request, stages: Optional[str] = None) -> MatchOut:
+        """Queue stages for a match that exists: the landing page's "run
+        detection here" button. The worker, or the API's own thread, picks
+        them up; a match with a job already queued or running is left alone
+        so a double tap cannot start the same work twice."""
+        store: ArtifactStore = request.app.state.artifacts
+        wanted = [x for x in (stages or "s2_detection,s3_tracking,s8_events").split(",") if x]
+        unknown = [x for x in wanted if x not in ORDER]
+        if unknown:
+            raise HTTPException(422, f"unknown stages {unknown}; known: {ORDER}")
+        with session_scope(request.app.state.engine) as s:
+            m = s.get(Match, match_id)
+            if m is None:
+                raise HTTPException(404, "no such match")
+            if any(j.status in ("queued", "claimed", "running") for j in m.jobs):
+                raise HTTPException(409, "this match already has work queued or running")
+            if not m.source_key:
+                raise HTTPException(409, "this match has no video yet")
+        enqueue_stages(request.app.state.settings, match_id, wanted)
+        with session_scope(request.app.state.engine) as s:
+            return _match_out(s.get(Match, match_id), store)
+
     @app.get("/matches", response_model=list[MatchOut])
     def list_matches(request: Request) -> list[MatchOut]:
         store = request.app.state.artifacts

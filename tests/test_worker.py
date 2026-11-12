@@ -75,3 +75,28 @@ def test_a_file_database_uses_write_ahead_logging(tmp_path):
     engine = build_engine(Settings(data_dir=tmp_path / "data"))
     with engine.connect() as conn:
         assert conn.execute(text("PRAGMA journal_mode")).scalar() == "wal"
+
+
+def test_the_run_button_queues_detection_for_an_existing_match(tmp_path, clip):
+    from sideline.pipeline import ingest_local
+
+    settings = Settings(data_dir=tmp_path / "data", job_runner="db")
+    match_id = ingest_local(settings, clip, kickoff_offset_ms=400)          # ingested and sampled, inline
+    with TestClient(create_app(settings)) as c:
+        assert c.post("/matches/nope/jobs").status_code == 404
+        assert c.post(f"/matches/{match_id}/jobs", params={"stages": "s9_publish"}).status_code == 422
+        r = c.post(f"/matches/{match_id}/jobs")
+        assert r.status_code == 201, r.text
+        assert [(j["stage"], j["status"]) for j in r.json()["jobs"]] == [
+            ("s2_detection", "queued"), ("s3_tracking", "queued"), ("s8_events", "queued")]
+        # A second tap while work is queued is refused rather than doubled.
+        assert c.post(f"/matches/{match_id}/jobs").status_code == 409
+        # A match with no video yet cannot be run.
+        empty = c.post("/matches", data={"capture_mode": "followcam"}).json()["id"]
+        assert c.post(f"/matches/{empty}/jobs").status_code == 409
+    # The worker then runs them; detection fails here for want of a model,
+    # which is recorded on the job and shown on the page as a failure.
+    assert main(settings, once=True) == 0
+    with session_scope(build_engine(settings)) as s:
+        jobs = s.query(Job).filter_by(match_id=match_id).order_by(Job.created_at).all()
+        assert jobs[0].stage == "s2_detection" and jobs[0].status == "failed" and "ultralytics" in (jobs[0].error or "")
