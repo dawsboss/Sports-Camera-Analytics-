@@ -9,9 +9,11 @@ tunnel. Video and Parquet are never served."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -59,6 +61,8 @@ class JobOut(BaseModel):
     status: str
     error: Optional[str] = None
     artifact_version: Optional[int] = None
+    progress: Optional[float] = None
+    detail: Optional[str] = None
 
 
 class DecisionIn(BaseModel):
@@ -129,7 +133,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             created_at=m.created_at.isoformat() if m.created_at else None,
             pitch_length=m.pitch_length, pitch_width=m.pitch_width,
             kickoff_offset_ms=m.kickoff_offset_ms,
-            jobs=[JobOut(id=j.id, stage=j.stage, status=j.status, error=j.error, artifact_version=j.artifact_version)
+            jobs=[JobOut(id=j.id, stage=j.stage, status=j.status, error=j.error, artifact_version=j.artifact_version,
+                         progress=j.progress, detail=j.detail)
                   for j in sorted(m.jobs, key=lambda j: j.created_at)],
             artifacts={stage: store.versions(m.id, stage) for stage in ORDER},
         )
@@ -158,20 +163,24 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             raise HTTPException(422, "capture_mode must be static or followcam")
         has_file = file is not None and bool(file.filename)
         link = (video_url or "").strip()
-        if has_file == bool(link):
-            raise HTTPException(422, "send either a video file or a direct link to one, not both and not neither")
+        if has_file and link:
+            raise HTTPException(422, "send either a video file or a direct link to one, not both")
         if link and not (link.startswith("http://") or link.startswith("https://")):
             raise HTTPException(422, "video_url must be an http(s) link to the video file itself")
         # No `stages` means the default ones (ingest and sampling; detection
         # is asked for by name because it wants a model and a GPU); `run=false`
         # registers the match and queues nothing, for a re-run later or a
         # stage started by hand. A linked video is fetched by a job before S0.
+        # With neither a file nor a link the match waits for its video to be
+        # streamed to PUT /matches/{id}/source, and the jobs queue then.
         wanted = [s for s in (stages or ",".join(DEFAULT_STAGES)).split(",") if s] if run else []
         unknown = [s for s in wanted if s not in ORDER]
         if unknown:
             raise HTTPException(422, f"unknown stages {unknown}; known: {ORDER}")
         if link and wanted:
             wanted = [FETCH] + wanted
+        if not has_file and not link:
+            wanted = []
 
         def _json(name: str, text: Optional[str]) -> Optional[dict]:
             if text is None or text == "":
@@ -185,14 +194,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         store: ArtifactStore = request.app.state.artifacts
         if has_file:
             filename = Path(file.filename or "upload.mp4").name
-            # Spool to disk first: a match is gigabytes, and the blob store wants a
-            # file it can stream, not a body held in memory.
-            tmp = Path(tempfile.mkdtemp(dir=st.workdir)) / filename
-            with tmp.open("wb") as out:
-                shutil.copyfileobj(file.file, out, length=8 * 1024 * 1024)
-        else:
+        elif link:
             filename = Path(link.split("?")[0].rstrip("/")).name or "match.mp4"
-            tmp = None
+        else:
+            filename = None
         with session_scope(request.app.state.engine) as s:
             m = Match(sm_match_id=sm_match_id, capture_mode=capture_mode, source_key="", original_filename=filename,
                       source_url=link or None,
@@ -200,14 +205,83 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                       roster=_json("roster", roster), stints=_json("stints", stints), periods=_json("periods", periods))
             s.add(m)
             s.flush()
-            if tmp is not None:
-                m.source_key = f"matches/{m.id}/source/{filename}"
-                request.app.state.blobs.put_file(m.source_key, tmp, file.content_type or "video/mp4")
             match_id = m.id
-        if tmp is not None:
-            shutil.rmtree(tmp.parent, ignore_errors=True)
+        if has_file:
+            # Straight from the parsed upload into the blob store, chunk by
+            # chunk; nothing else is copied.
+            key = f"matches/{match_id}/source/{filename}"
+            request.app.state.blobs.put_stream(key, iter(lambda: file.file.read(8 * 1024 * 1024), b""),
+                                               file.content_type or "video/mp4")
+            with session_scope(request.app.state.engine) as s:
+                s.get(Match, match_id).source_key = key
         if wanted:
             enqueue_stages(st, match_id, wanted)
+        with session_scope(request.app.state.engine) as s:
+            return _match_out(s.get(Match, match_id), store)
+
+    @app.put("/matches/{match_id}/source", response_model=MatchOut)
+    async def put_source(match_id: str, request: Request, filename: str = "match.mp4",
+                         stages: Optional[str] = None, run: bool = True) -> MatchOut:
+        """The video for a match created without one, streamed as the raw
+        request body into the blob store as it arrives: no multipart
+        parsing, no spool, no copy, flat memory however large the match.
+        The browser sends this after the metadata, and the stages queue
+        when the last byte lands."""
+        store: ArtifactStore = request.app.state.artifacts
+        with session_scope(request.app.state.engine) as s:
+            m = s.get(Match, match_id)
+            if m is None:
+                raise HTTPException(404, "no such match")
+            if m.source_key and request.app.state.blobs.exists(m.source_key):
+                raise HTTPException(409, "this match already has its video")
+        name = Path(filename).name or "match.mp4"
+        key = f"matches/{match_id}/source/{name}"
+        wanted = [x for x in (stages or ",".join(DEFAULT_STAGES)).split(",") if x] if run else []
+        unknown = [x for x in wanted if x not in ORDER]
+        if unknown:
+            raise HTTPException(422, f"unknown stages {unknown}; known: {ORDER}")
+        total = 0
+        # The body is read in the request's own loop; a thread writes the
+        # chunks into the blob store as they come, so the only memory in
+        # play is a few chunks.
+        blobs = request.app.state.blobs
+        q: "asyncio.Queue[Optional[bytes]]" = asyncio.Queue(maxsize=4)
+        loop = asyncio.get_running_loop()
+        done = loop.create_future()
+
+        def consume():
+            def gen():
+                while True:
+                    chunk = asyncio.run_coroutine_threadsafe(q.get(), loop).result()
+                    if chunk is None:
+                        return
+                    yield chunk
+            try:
+                n = blobs.put_stream(key, gen(), request.headers.get("content-type") or "video/mp4")
+                loop.call_soon_threadsafe(done.set_result, n)
+            except BaseException as e:
+                loop.call_soon_threadsafe(done.set_exception, e)
+
+        worker = threading.Thread(target=consume, name="sideline-upload", daemon=True)
+        worker.start()
+        try:
+            async for chunk in request.stream():
+                if chunk:
+                    total += len(chunk)
+                    await q.put(chunk)
+            await q.put(None)
+            written = await done
+        except Exception:
+            await q.put(None)
+            raise
+        if written == 0:
+            raise HTTPException(422, "the upload was empty")
+        with session_scope(request.app.state.engine) as s:
+            m = s.get(Match, match_id)
+            m.source_key = key
+            m.original_filename = m.original_filename or name
+        if wanted:
+            enqueue_stages(request.app.state.settings, match_id, wanted)
         with session_scope(request.app.state.engine) as s:
             return _match_out(s.get(Match, match_id), store)
 

@@ -16,6 +16,9 @@ Group=sideline
 WorkingDirectory=/srv/sideline/app
 Environment=SIDELINE_DATA_DIR=/srv/sideline/data
 Environment=SIDELINE_WEB_DIR=/srv/sideline/app/web
+# Debian mounts /tmp as a RAM-backed tmpfs; a match spooled there ate the
+# memory. Temporary files go on the data disk.
+Environment=TMPDIR=/srv/sideline/data/work
 ExecStart=/srv/sideline/venv/bin/sideline serve --host 0.0.0.0 --port 8000 --data /srv/sideline/data
 Restart=always
 RestartSec=3

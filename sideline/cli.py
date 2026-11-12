@@ -137,6 +137,14 @@ def _serve(args: argparse.Namespace) -> int:
     # One machine, no Redis: uploads return at once and the stages run on a
     # background thread of this process. Redis, when configured, still wins.
     os.environ.setdefault("SIDELINE_JOB_RUNNER", "rq" if os.environ.get("SIDELINE_REDIS_URL") else "thread")
+    # Anything spooled to a temporary file (a multipart upload the framework
+    # parses before a handler runs) goes on the data disk, not /tmp: on the
+    # homelab /tmp is a RAM-backed tmpfs inside the service's private
+    # namespace, and a match spooled there filled memory and swap at 80% of
+    # the upload. Set for this process only, before anything reads it.
+    from sideline.config import Settings
+
+    os.environ.setdefault("TMPDIR", str(Settings.from_env().workdir))
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print("serving the review page and sampled frames to every device on this network; "
               "keep this port off the internet (no public tunnel), or bind --host 127.0.0.1", file=sys.stderr)

@@ -55,7 +55,9 @@ def test_a_linked_video_is_fetched_then_ingested_inline(tmp_path, served_clip):
 def test_bad_film_requests_are_refused(tmp_path, clip):
     settings = Settings(data_dir=tmp_path / "data", inline_jobs=True)
     with TestClient(create_app(settings)) as c:
-        assert c.post("/matches", data={"capture_mode": "followcam"}).status_code == 422
+        # Neither a file nor a link makes a match that waits for its video.
+        r = c.post("/matches", data={"capture_mode": "followcam"})
+        assert r.status_code == 201 and r.json()["jobs"] == []
         assert c.post("/matches", data={"video_url": "ftp://x/y.mp4"}).status_code == 422
         with clip.open("rb") as f:
             r = c.post("/matches", files={"file": ("clip.mp4", f, "video/mp4")}, data={"video_url": "http://x/y.mp4"})
@@ -178,3 +180,64 @@ def test_a_database_from_before_a_column_gains_it_on_start(tmp_path):
         # Old rows take the model's plain defaults rather than reading None.
         assert old.pitch_length == 105.0 and old.pitch_width == 68.0 and old.sport == "soccer" and old.source_url is None
         s.add(Match(capture_mode="followcam", source_key="", source_url="http://x/y.mp4"))
+
+
+def test_blobs_stream_without_a_spool_and_leave_nothing_on_failure(tmp_path):
+    from sideline.storage import ImmutableWriteError, LocalBlobStore
+
+    store = LocalBlobStore(tmp_path / "blobs")
+    n = store.put_stream("a/b.bin", iter([b"ab", b"cd", b""]), "application/octet-stream")
+    assert n == 4 and store.get("a/b.bin") == b"abcd"
+    with pytest.raises(ImmutableWriteError):
+        store.put_stream("a/b.bin", iter([b"x"]))
+
+    def broken():
+        yield b"part"
+        raise OSError("the network went")
+
+    with pytest.raises(OSError):
+        store.put_stream("a/c.bin", broken())
+    assert not store.exists("a/c.bin") and not list((tmp_path / "blobs" / "a").glob("*.part"))
+
+
+def test_the_video_can_be_streamed_to_a_match_after_its_details(tmp_path, clip):
+    settings = Settings(data_dir=tmp_path / "data", inline_jobs=True)
+    with TestClient(create_app(settings)) as c:
+        r = c.post("/matches", data={"capture_mode": "followcam", "kickoff_offset_ms": "500"})
+        assert r.status_code == 201, r.text
+        m = r.json()
+        assert m["jobs"] == [] and m["original_filename"] is None       # waiting for its video
+        with clip.open("rb") as f:
+            r = c.put(f"/matches/{m['id']}/source", params={"filename": "clip.mp4"}, content=f.read(),
+                      headers={"Content-Type": "video/mp4"})
+        assert r.status_code == 200, r.text
+        m = r.json()
+        assert [j["stage"] for j in m["jobs"]] == ["s0_ingest", "s1_sampling"] and all(j["status"] == "done" for j in m["jobs"])
+        assert m["original_filename"] == "clip.mp4" and m["artifacts"]["s1_sampling"] == [1]
+        # Every job reports how far it got and what it did.
+        assert all(j["progress"] == 1.0 for j in m["jobs"])
+        assert m["jobs"][1]["detail"].startswith("sampled 15 frames")
+        # A second video for the same match is refused; an empty one too; an unknown match 404s.
+        assert c.put(f"/matches/{m['id']}/source", content=b"xx").status_code == 409
+        assert c.put("/matches/nope/source", content=b"xx").status_code == 404
+        r = c.post("/matches", data={"capture_mode": "followcam"})
+        assert c.put(f"/matches/{r.json()['id']}/source", content=b"").status_code == 422
+        # The work directory holds no copy of the upload.
+        assert not list((tmp_path / "data" / "work").glob("**/*.mp4"))
+
+
+def test_s0_reports_transcode_progress_when_ffmpeg_is_there(tmp_path, clip):
+    import shutil as _sh
+
+    from sideline.pipeline import ingest_local, record_of, run_stage
+
+    settings = Settings(data_dir=tmp_path / "data", inline_jobs=True)
+    match_id = ingest_local(settings, clip, kickoff_offset_ms=0, stages=[])
+    seen = []
+    with session_scope(build_engine(settings)) as s:
+        rec = record_of(s.get(Match, match_id))
+    run_stage(settings, rec, "s0_ingest", {"detect_halftime": False}, progress=lambda f, d: seen.append((f, d)))
+    fractions = [f for f, _ in seen]
+    assert fractions == sorted(fractions) and fractions[-1] == 1.0 and seen[-1][1] == "ingested"
+    if _sh.which("ffmpeg"):
+        assert any(d.startswith("transcoding") for _, d in seen), seen

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol
 
 from sideline.storage.artifacts import ArtifactRef, ArtifactStore
 from sideline.storage.blobs import BlobStore
@@ -32,6 +32,9 @@ class StageContext:
     workdir: Path
     pipeline_version: str = "0.1.0"
     config: dict = field(default_factory=dict)
+    # Called by a stage as it goes: a fraction done and a few words. The
+    # runner records it on the job; a stage run from a terminal gets a no-op.
+    progress: Callable[[float, str], None] = lambda fraction, detail: None
 
     def fetch(self, key: str, name: Optional[str] = None) -> Path:
         """A local path for a blob: the store's own file when it has one,

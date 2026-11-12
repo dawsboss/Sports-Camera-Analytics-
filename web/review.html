@@ -90,6 +90,7 @@
       <label class="check"><input type="checkbox" id="f_detect"><span>Also find the players, the ball and the restarts here. Needs the detector model and takes hours without a GPU; leave off to do that step on the GPU machine.</span></label>
       <button class="primary" id="f_go" type="submit">Add</button>
       <progress id="f_prog" value="0" max="100" hidden></progress>
+      <div class="status" id="f_note" hidden></div>
       <div class="err" id="f_err" hidden></div>
     </form>
   </aside>
@@ -159,13 +160,21 @@
       const jobs = m.jobs || [];
       const failed = jobs.find(j => j.status === 'failed');
       if (failed) return { cls: 'failed', text: `${STAGE_WORDS[failed.stage] || failed.stage} failed: ${(failed.error || '').slice(0, 120)}` };
-      const live = jobs.find(j => j.status === 'running') || jobs.find(j => j.status === 'queued');
-      if (live) return { cls: 'busy', text: `${STAGE_WORDS[live.stage] || live.stage}${live.status === 'queued' ? ' (queued)' : '…'}` };
+      const running = jobs.find(j => j.status === 'running');
+      if (running) {
+        const pct = running.progress != null ? ` ${Math.round(running.progress * 100)}%` : '';
+        const step = jobs.indexOf(running) + 1;
+        return { cls: 'busy', text: `step ${step} of ${jobs.length}: ${running.detail || STAGE_WORDS[running.stage] || running.stage}${pct}` };
+      }
+      const queued = jobs.find(j => j.status === 'queued');
+      if (queued) return { cls: 'busy', text: `waiting to start: ${STAGE_WORDS[queued.stage] || queued.stage}` };
       const a = m.artifacts || {};
       if (a.s8_events && a.s8_events.length) return { cls: 'ready', text: `ready to review · events v${Math.max(...a.s8_events)}` };
       if (a.s1_sampling && a.s1_sampling.length) return { cls: '', text: 'sampled; needs detection on the GPU machine (sideline run)' };
+      if (!jobs.length && !m.source_url) return { cls: '', text: 'waiting for its video' };
       return { cls: '', text: 'nothing run yet' };
     }
+    const gb = n => `${(n / 1e9).toFixed(2)} GB`;
     let timer = null;
     async function refresh() {
       const list = await api('/matches');
@@ -195,26 +204,47 @@
       err.hidden = true;
       if (!file && !url) { err.hidden = false; err.textContent = 'Pick a video file or paste a direct link to one.'; return; }
       if (file && url) { err.hidden = false; err.textContent = 'One or the other, not both.'; return; }
+      const stages = $('f_detect').checked ? 's0_ingest,s1_sampling,s2_detection,s3_tracking,s8_events' : '';
       const fd = new FormData();
-      if (file) fd.append('file', file, file.name); else fd.append('video_url', url);
+      if (url) fd.append('video_url', url);
       fd.append('capture_mode', $('f_mode').value);
       fd.append('pitch_length', $('f_len').value || '105');
       fd.append('pitch_width', $('f_wid').value || '68');
       const kick = $('f_kick').value.trim();
       if (kick) { const [mm, ss] = kick.split(':').map(Number); fd.append('kickoff_offset_ms', String((mm * 60 + ss) * 1000)); }
       if ($('f_sm').value.trim()) fd.append('sm_match_id', $('f_sm').value.trim());
-      if ($('f_detect').checked) fd.append('stages', 's0_ingest,s1_sampling,s2_detection,s3_tracking,s8_events');
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/matches');
-      $('f_go').disabled = true; $('f_prog').hidden = false; $('f_prog').value = 0;
-      xhr.upload.onprogress = e => { if (e.lengthComputable) $('f_prog').value = Math.round(100 * e.loaded / e.total); };
-      xhr.onload = () => {
-        $('f_go').disabled = false; $('f_prog').hidden = true;
-        if (xhr.status === 201) { $('add').reset(); refresh().catch(() => {}); }
-        else { err.hidden = false; err.textContent = `The server refused it: ${xhr.status} ${xhr.responseText.slice(0, 200)}`; }
-      };
-      xhr.onerror = () => { $('f_go').disabled = false; $('f_prog').hidden = true; err.hidden = false; err.textContent = 'The upload failed before the server answered.'; };
-      xhr.send(fd);
+      if (stages) fd.append('stages', stages);
+      const note = $('f_note');
+      const busy = (on, text) => { $('f_go').disabled = on; $('f_prog').hidden = !on; note.hidden = !text; note.textContent = text || ''; };
+      const failed = msg => { busy(false, ''); err.hidden = false; err.textContent = msg; };
+      // Two requests: the details first (small), then the video streamed to
+      // its own route, so the server writes it straight to disk as it
+      // arrives and the progress bar is the real upload.
+      busy(true, url ? 'Registering the match…' : `Registering the match for ${esc(file.name)}…`);
+      fetch('/matches', { method: 'POST', body: fd }).then(async r => {
+        if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
+        return r.json();
+      }).then(m => {
+        if (!file) { busy(false, ''); $('add').reset(); refresh().catch(() => {}); return; }
+        const xhr = new XMLHttpRequest();
+        const q = new URLSearchParams({ filename: file.name });
+        if (stages) q.set('stages', stages);
+        xhr.open('PUT', `/matches/${encodeURIComponent(m.id)}/source?${q}`);
+        xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+        $('f_prog').value = 0;
+        xhr.upload.onprogress = e => {
+          if (!e.lengthComputable) return;
+          $('f_prog').value = Math.round(100 * e.loaded / e.total);
+          note.textContent = `Uploading ${gb(e.loaded)} of ${gb(e.total)}`;
+        };
+        xhr.upload.onload = () => { note.textContent = `All ${gb(file.size)} sent; the server is finishing the file…`; };
+        xhr.onload = () => {
+          if (xhr.status === 200) { busy(false, ''); $('add').reset(); refresh().catch(() => {}); }
+          else failed(`The server refused the video: ${xhr.status} ${xhr.responseText.slice(0, 200)}`);
+        };
+        xhr.onerror = () => failed('The upload broke before the server answered. The match is listed as waiting for its video; add it again.');
+        xhr.send(file);
+      }).catch(e => failed(`The server refused it: ${e.message}`));
     });
     return;
   }

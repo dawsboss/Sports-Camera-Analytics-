@@ -4,9 +4,10 @@ a terminal with no services."""
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from sideline.config import Settings, build_blobs, build_engine, build_queue
 from sideline.db.models import Job, Match, StageRun
@@ -23,7 +24,8 @@ def record_of(m: Match) -> MatchRecord:
     )
 
 
-def run_stage(settings: Settings, match: MatchRecord, stage: str, config: Optional[dict] = None) -> ArtifactRef:
+def run_stage(settings: Settings, match: MatchRecord, stage: str, config: Optional[dict] = None,
+              progress: Optional[Callable[[float, str], None]] = None) -> ArtifactRef:
     """Run one stage for one match and record the version it wrote."""
     if stage not in STAGES:
         raise KeyError(f"unknown stage {stage!r}; known: {ORDER}")
@@ -31,7 +33,8 @@ def run_stage(settings: Settings, match: MatchRecord, stage: str, config: Option
     artifacts = ArtifactStore(blobs)
     cfg = {"sample_fps": settings.sample_fps, "cache_frames": settings.cache_frames, **(config or {})}
     ctx = StageContext(match=match, artifacts=artifacts, blobs=blobs, workdir=settings.workdir,
-                       pipeline_version=settings.pipeline_version, config=cfg)
+                       pipeline_version=settings.pipeline_version, config=cfg,
+                       progress=progress or (lambda fraction, detail: None))
     ref = STAGES[stage].run(ctx)
     engine = build_engine(settings)
     with session_scope(engine) as s:
@@ -46,13 +49,33 @@ FETCH = "fetch"          # the job that lands a linked video in the blob store, 
 MAX_FETCH_BYTES = 32 * 1024 ** 3
 
 
-def fetch_source(settings: Settings, match_id: str) -> str:
+def job_progress(settings: Settings, job_id: str, every_s: float = 2.0) -> Callable[[float, str], None]:
+    """A callback that writes a job's progress to its row, at most every
+    few seconds, so a stage can report every frame without a write per
+    frame. The final 1.0 always lands."""
+    engine = build_engine(settings)
+    last = {"t": 0.0}
+
+    def report(fraction: float, detail: str) -> None:
+        now = time.monotonic()
+        if fraction < 1.0 and now - last["t"] < every_s:
+            return
+        last["t"] = now
+        with session_scope(engine) as s:
+            job = s.get(Job, job_id)
+            if job is not None:
+                job.progress = max(0.0, min(1.0, float(fraction)))
+                job.detail = (detail or "")[:255]
+
+    return report
+
+
+def fetch_source(settings: Settings, match_id: str, progress: Optional[Callable[[float, str], None]] = None) -> str:
     """Download the match's `source_url` into `matches/{id}/source/` and
     point `source_key` at it. Direct links to a video file over http(s)
-    only, streamed to disk; a Veo match page is not a video and is refused
-    by the content type. Returns the blob key."""
-    import shutil
-    import tempfile
+    only, streamed straight into the blob store; a Veo match page is not a
+    video and is refused by the content type. Returns the blob key."""
+    progress = progress or (lambda fraction, detail: None)
     import urllib.parse
     import urllib.request
 
@@ -77,14 +100,14 @@ def fetch_source(settings: Settings, match_id: str) -> str:
     if not blobs.exists(key):
         # A retry after the download landed but the record did not: the blob
         # is there, immutable, and only the record needs writing.
-        tmpdir = Path(tempfile.mkdtemp(dir=settings.workdir))
-        try:
-            tmp = tmpdir / name
-            req = urllib.request.Request(url, headers={"User-Agent": "sideline/0.1"})
-            with _http_only_opener().open(req, timeout=60) as resp, tmp.open("wb") as out:
-                ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-                if ctype and not (ctype.startswith("video/") or ctype in ("application/octet-stream", "binary/octet-stream")):
-                    raise ValueError(f"{url} serves {ctype}, not a video; the link must be to the file itself")
+        req = urllib.request.Request(url, headers={"User-Agent": "sideline/0.1"})
+        with _http_only_opener().open(req, timeout=60) as resp:
+            ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype and not (ctype.startswith("video/") or ctype in ("application/octet-stream", "binary/octet-stream")):
+                raise ValueError(f"{url} serves {ctype}, not a video; the link must be to the file itself")
+            expected = int(resp.headers.get("Content-Length") or 0)
+
+            def chunks():
                 total = 0
                 while True:
                     chunk = resp.read(8 * 1024 * 1024)
@@ -93,12 +116,14 @@ def fetch_source(settings: Settings, match_id: str) -> str:
                     total += len(chunk)
                     if total > MAX_FETCH_BYTES:
                         raise ValueError("the file is larger than the fetch limit")
-                    out.write(chunk)
-            if total == 0:
-                raise ValueError(f"{url} returned an empty file")
-            blobs.put_file(key, tmp, "video/mp4")
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
+                    progress(min(0.99, total / expected) if expected else 0.0,
+                             f"fetching {total / 1e9:.2f} of {expected / 1e9:.2f} GB" if expected else f"fetching {total / 1e9:.2f} GB")
+                    yield chunk
+
+            total = blobs.put_stream(key, chunks(), "video/mp4")
+        if total == 0:
+            raise ValueError(f"{url} returned an empty file")
+        progress(1.0, f"fetched {total / 1e9:.2f} GB")
     with session_scope(engine) as s:
         m = s.get(Match, match_id)
         m.source_key = key
@@ -134,14 +159,15 @@ def run_job(settings: Settings, job_id: str) -> Optional[ArtifactRef]:
         job.status, job.started_at = "running", datetime.now(timezone.utc)
         match = record_of(s.get(Match, job.match_id))
         stage = job.stage
+    progress = job_progress(settings, job_id)
     try:
         if stage == FETCH:
-            fetch_source(settings, match.id)
+            fetch_source(settings, match.id, progress)
             with session_scope(engine) as s:
                 match = record_of(s.get(Match, match.id))
             ref = None
         else:
-            ref = run_stage(settings, match, stage)
+            ref = run_stage(settings, match, stage, progress=progress)
     except Exception as e:  # the failure is the record; re-raise for the queue
         with session_scope(engine) as s:
             job = s.get(Job, job_id)
@@ -149,7 +175,7 @@ def run_job(settings: Settings, job_id: str) -> Optional[ArtifactRef]:
         raise
     with session_scope(engine) as s:
         job = s.get(Job, job_id)
-        job.status, job.finished_at = "done", datetime.now(timezone.utc)
+        job.status, job.finished_at, job.progress = "done", datetime.now(timezone.utc), 1.0
         job.artifact_version = ref.version if ref is not None else None
     return ref
 

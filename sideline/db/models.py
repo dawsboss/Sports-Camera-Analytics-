@@ -63,6 +63,10 @@ class Job(Base):
     match_id: Mapped[str] = mapped_column(ForeignKey("matches.id"), index=True)
     stage: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16), default="queued")   # queued | running | done | failed
+    # How far a running job has got, 0 to 1, and what it is doing, so a
+    # coach watching a two-hour transcode sees it move.
+    progress: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    detail: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     queue_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     artifact_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

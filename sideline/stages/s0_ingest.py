@@ -39,15 +39,31 @@ def probe(path: Path) -> dict:
             "duration_ms": int(round(1000 * frames / fps)) if frames > 0 else 0}
 
 
-def transcode(src: Path, dst: Path) -> bool:
+def transcode(src: Path, dst: Path, duration_ms: int = 0, progress=lambda f, d: None) -> bool:
     """H.264 in an MP4 with the index up front, if ffmpeg is on the path.
-    Without it the source is used as is and match.json says so."""
+    Without it the source is used as is and match.json says so. ffmpeg's
+    own progress lines, against the source's duration, feed the callback:
+    a match takes an hour on two cores and a coach should see it move."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         return False
-    cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", str(src), "-c:v", "libx264", "-preset", "fast",
-           "-crf", "20", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", str(dst)]
-    subprocess.run(cmd, check=True)
+    cmd = [ffmpeg, "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-i", str(src), "-c:v", "libx264",
+           "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", str(dst)]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            if line.startswith("out_time_ms=") and duration_ms > 0:
+                try:
+                    done_ms = int(line.split("=", 1)[1]) / 1000.0
+                except ValueError:
+                    continue
+                frac = max(0.0, min(0.99, done_ms / duration_ms))
+                progress(frac, f"transcoding {int(frac * 100)}%")
+    finally:
+        rc = proc.wait()
+    if rc != 0:
+        raise subprocess.CalledProcessError(rc, cmd)
     return True
 
 
@@ -127,15 +143,22 @@ class IngestStage:
         work = ctx.workdir / f"{m.id}_{self.name}_v{ref.version:03d}"
         work.mkdir(parents=True, exist_ok=True)
         out = work / "video.mp4"
-        transcoded = bool(ctx.config.get("transcode", True)) and transcode(src, out)
+        ctx.progress(0.0, "probing the upload")
+        source_info = probe(src)
+        # Transcoding is most of the hour; the rest is quick.
+        transcoded = bool(ctx.config.get("transcode", True)) and transcode(
+            src, out, source_info["duration_ms"], lambda f, d: ctx.progress(0.85 * f, d))
         if not transcoded:
             out = src
         info = probe(out)
         if info["frame_count"] <= 0:
             raise ValueError("video reports no frames after ingest")
         video_key = ref.key("video.mp4")
+        ctx.progress(0.86, "storing the transcoded video")
         ctx.blobs.put_file(video_key, out, "video/mp4")
+        ctx.progress(0.9, "looking for half-time")
         halftime = detect_halftime(out, info) if ctx.config.get("detect_halftime", True) else None
+        ctx.progress(0.95, "writing keyframes")
         keyframes = write_keyframes(ctx, ref, out, info, every_s=float(ctx.config.get("keyframe_every_s", 60.0)))
         doc = MatchJson(
             match_id=m.id, sm_match_id=m.sm_match_id, capture_mode=CaptureMode(m.capture_mode),
@@ -145,6 +168,9 @@ class IngestStage:
             pitch=PitchDimensions(length_m=m.pitch_length, width_m=m.pitch_width),
         )
         ctx.artifacts.write_json(ref, "match.json", doc.model_dump(mode="json"))
+        if out is not src:
+            out.unlink(missing_ok=True)          # the blob store has it; the work copy is a second 2 GB
+        ctx.progress(1.0, "ingested")
         ctx.artifacts.write_manifest(
             ref, config={"transcode": bool(ctx.config.get("transcode", True)), "ffmpeg": shutil.which("ffmpeg") is not None},
             inputs=[], capture_mode=m.capture_mode, stage_version=self.version,

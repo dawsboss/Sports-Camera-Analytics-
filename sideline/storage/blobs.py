@@ -11,7 +11,7 @@ from __future__ import annotations
 import io
 import shutil
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Iterable, Optional, Protocol
 
 
 class ImmutableWriteError(RuntimeError):
@@ -21,6 +21,7 @@ class ImmutableWriteError(RuntimeError):
 class BlobStore(Protocol):
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream", overwrite: bool = False) -> None: ...
     def put_file(self, key: str, path: Path, content_type: str = "application/octet-stream", overwrite: bool = False) -> None: ...
+    def put_stream(self, key: str, chunks: Iterable[bytes], content_type: str = "application/octet-stream") -> int: ...
     def get(self, key: str) -> bytes: ...
     def get_to_file(self, key: str, path: Path) -> Path: ...
     def exists(self, key: str) -> bool: ...
@@ -56,6 +57,29 @@ class LocalBlobStore:
         tmp = p.with_suffix(p.suffix + ".part")
         shutil.copyfile(path, tmp)
         tmp.replace(p)
+
+    def put_stream(self, key: str, chunks: Iterable[bytes], content_type: str = "application/octet-stream") -> int:
+        """Write a blob from chunks as they arrive, with nothing held in
+        memory or spooled elsewhere: a match upload is gigabytes and the
+        machine serving it may have two. The `.part` file becomes the blob
+        only when the stream ends, so a broken upload leaves no blob and
+        `put` still refuses to overwrite. Returns the bytes written."""
+        p = self._path(key)
+        if p.exists():
+            raise ImmutableWriteError(key)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(p.suffix + ".part")
+        total = 0
+        try:
+            with tmp.open("wb") as out:
+                for chunk in chunks:
+                    out.write(chunk)
+                    total += len(chunk)
+            tmp.replace(p)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        return total
 
     def get(self, key: str) -> bytes:
         return self._path(key).read_bytes()
@@ -105,6 +129,35 @@ class MinioBlobStore:
         if not overwrite and self.exists(key):
             raise ImmutableWriteError(key)
         self.client.fput_object(self.bucket, key, str(path), content_type=content_type)
+
+    def put_stream(self, key: str, chunks: Iterable[bytes], content_type: str = "application/octet-stream") -> int:
+        if self.exists(key):
+            raise ImmutableWriteError(key)
+
+        class _Reader(io.RawIOBase):
+            def __init__(self) -> None:
+                self.it = iter(chunks)
+                self.buf = b""
+                self.total = 0
+
+            def readable(self) -> bool:
+                return True
+
+            def readinto(self, b) -> int:
+                while not self.buf:
+                    try:
+                        self.buf = next(self.it)
+                    except StopIteration:
+                        return 0
+                n = min(len(b), len(self.buf))
+                b[:n] = self.buf[:n]
+                self.buf = self.buf[n:]
+                self.total += n
+                return n
+
+        reader = _Reader()
+        self.client.put_object(self.bucket, key, reader, length=-1, part_size=16 * 1024 * 1024, content_type=content_type)
+        return reader.total
 
     def get(self, key: str) -> bytes:
         resp = self.client.get_object(self.bucket, key)

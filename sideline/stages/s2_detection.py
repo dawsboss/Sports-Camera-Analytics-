@@ -63,10 +63,11 @@ class DetectionStage:
         video_key = ctx.artifacts.read_manifest(s1).get("video_key")
         rows: list[dict] = []
         kept, dropped = Counter(), 0
-        for fr in frames:
+        for n, fr in enumerate(frames):
             frame = self._load(ctx, fr, video_key)
             if frame is None:
                 continue
+            ctx.progress(min(0.99, n / max(1, len(frames))), f"detecting in frame {n + 1} of {len(frames)}")
             dets = detector.detect(frame)
             if grass is not None and any(d.cls not in object_classes for d in dets):
                 mask, scale = grass.mask(frame)
@@ -79,6 +80,7 @@ class DetectionStage:
                              "x1": d.x1, "y1": d.y1, "x2": d.x2, "y2": d.y2, "conf": d.conf})
         table = pa.Table.from_pylist(rows, schema=DETECTIONS_SCHEMA)
         ctx.artifacts.write_table(ref, "detections.parquet", table)
+        ctx.progress(1.0, f"{len(rows)} detections in {len(frames)} frames")
         ctx.artifacts.write_manifest(
             ref, config={"detector": detector.describe(), "grass_filter": bool(use_grass),
                          "grass_min_frac": grass.min_frac if grass else None, "max_frames": max_frames},

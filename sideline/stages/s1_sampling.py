@@ -39,6 +39,9 @@ class SamplingStage:
         if not cap.isOpened():
             raise ValueError(f"cannot open {path}")
         fps = float(match["fps"])
+        expected = max(1, int(round(int(match["frame_count"]) * sample_fps / fps)))
+        if max_frames is not None:
+            expected = min(expected, int(max_frames))
         rows = []
         try:
             # Walk the file once; grab() is cheap, retrieve() only for the
@@ -64,6 +67,7 @@ class SamplingStage:
                     rows.append({"frame_index": k, "t_ms": t_ms, "source_frame": source_index, "key": key})
                     k += 1
                     next_target = int(round(k * fps / sample_fps))
+                    ctx.progress(min(0.99, k / expected), f"sampling frame {k} of about {expected}")
                 source_index += 1
         finally:
             cap.release()
@@ -71,6 +75,7 @@ class SamplingStage:
             raise ValueError("no frames could be decoded")
         table = pa.Table.from_pylist(rows, schema=FRAMES_SCHEMA)
         ctx.artifacts.write_table(ref, "frames.parquet", table)
+        ctx.progress(1.0, f"sampled {len(rows)} frames")
         ctx.artifacts.write_manifest(
             ref, config={"sample_fps": sample_fps, "cache_frames": cache, "jpeg_quality": quality},
             inputs=[s0], capture_mode=m.capture_mode, stage_version=self.version,
