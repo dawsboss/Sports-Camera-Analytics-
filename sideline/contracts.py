@@ -163,7 +163,8 @@ class MatchJson(BaseModel):
     height: int
     frame_count: int
     codec: Optional[str] = None
-    transcoded: bool
+    transcoded: bool                       # re-encoded to H.264
+    remuxed: bool = False                  # already H.264: the stream was copied into a fresh MP4 with its index up front
     halftime: Optional[Halftime] = None
     kickoff_offset_ms: Optional[int] = None
     pitch: PitchDimensions

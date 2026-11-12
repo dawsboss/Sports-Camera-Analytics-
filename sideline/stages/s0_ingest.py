@@ -1,10 +1,16 @@
 """S0 — Ingest.
 
-Transcode to a known codec, pull keyframes for the scrubber, look for the
-half-time break, write match.json with duration, fps and resolution. The
+Bring the video to a known codec, pull keyframes for the scrubber, look for
+the break in play, write match.json with duration, fps and resolution. The
 video that every later stage decodes is this stage's `video.mp4`, never the
 upload, so a re-encode is a new S0 version and nothing downstream has to
 know what Veo exported.
+
+The known codec is H.264 in an MP4, and a Veo export already is one. Such a
+file is remuxed, not re-encoded: the stream is copied into a fresh MP4 with
+its index at the front, which is bound by disk speed and takes a minute,
+where re-encoding a match on two cores took an hour. Anything else is
+transcoded.
 """
 
 from __future__ import annotations
@@ -39,16 +45,27 @@ def probe(path: Path) -> dict:
             "duration_ms": int(round(1000 * frames / fps)) if frames > 0 else 0}
 
 
-def transcode(src: Path, dst: Path, duration_ms: int = 0, progress=lambda f, d: None) -> bool:
+# What cv2 reports for an H.264 stream in an MP4 or MOV, depending on the muxer.
+H264_FOURCCS = {"avc1", "h264", "H264", "AVC1", "x264"}
+
+
+def is_h264_mp4(path: Path, info: dict) -> bool:
+    return (info.get("codec") or "") in H264_FOURCCS and path.suffix.lower() in (".mp4", ".mov", ".m4v")
+
+
+def transcode(src: Path, dst: Path, duration_ms: int = 0, progress=lambda f, d: None, copy: bool = False) -> bool:
     """H.264 in an MP4 with the index up front, if ffmpeg is on the path.
-    Without it the source is used as is and match.json says so. ffmpeg's
-    own progress lines, against the source's duration, feed the callback:
-    a match takes an hour on two cores and a coach should see it move."""
+    Without it the source is used as is and match.json says so. With
+    `copy` the stream is remuxed rather than re-encoded, for a source that
+    is H.264 already. ffmpeg's own progress lines, against the source's
+    duration, feed the callback: a re-encode takes an hour on two cores and
+    a coach should see it move."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         return False
-    cmd = [ffmpeg, "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-i", str(src), "-c:v", "libx264",
-           "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", str(dst)]
+    codec = ["-c:v", "copy"] if copy else ["-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p"]
+    cmd = [ffmpeg, "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-i", str(src), *codec,
+           "-an", "-movflags", "+faststart", str(dst)]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
     try:
         assert proc.stdout is not None
@@ -59,7 +76,7 @@ def transcode(src: Path, dst: Path, duration_ms: int = 0, progress=lambda f, d: 
                 except ValueError:
                     continue
                 frac = max(0.0, min(0.99, done_ms / duration_ms))
-                progress(frac, f"transcoding {int(frac * 100)}%")
+                progress(frac, f"{'copying the video stream' if copy else 'transcoding'} {int(frac * 100)}%")
     finally:
         rc = proc.wait()
     if rc != 0:
@@ -145,10 +162,13 @@ class IngestStage:
         out = work / "video.mp4"
         ctx.progress(0.0, "probing the upload")
         source_info = probe(src)
-        # Transcoding is most of the hour; the rest is quick.
-        transcoded = bool(ctx.config.get("transcode", True)) and transcode(
-            src, out, source_info["duration_ms"], lambda f, d: ctx.progress(0.85 * f, d))
-        if not transcoded:
+        # Re-encoding is the hour; a Veo export is H.264 already and is only
+        # remuxed, which is minutes. The rest is quick either way.
+        remux = is_h264_mp4(src, source_info) and bool(ctx.config.get("remux_h264", True))
+        converted = bool(ctx.config.get("transcode", True)) and transcode(
+            src, out, source_info["duration_ms"], lambda f, d: ctx.progress(0.85 * f, d), copy=remux)
+        transcoded, remuxed = (converted and not remux), (converted and remux)
+        if not converted:
             out = src
         info = probe(out)
         if info["frame_count"] <= 0:
@@ -164,14 +184,15 @@ class IngestStage:
             match_id=m.id, sm_match_id=m.sm_match_id, capture_mode=CaptureMode(m.capture_mode),
             source_key=m.source_key, video_key=video_key, duration_ms=info["duration_ms"], fps=info["fps"],
             width=info["width"], height=info["height"], frame_count=info["frame_count"], codec=info["codec"],
-            transcoded=transcoded, halftime=halftime, kickoff_offset_ms=m.kickoff_offset_ms,
+            transcoded=transcoded, remuxed=remuxed, halftime=halftime, kickoff_offset_ms=m.kickoff_offset_ms,
             pitch=PitchDimensions(length_m=m.pitch_length, width_m=m.pitch_width),
         )
         ctx.artifacts.write_json(ref, "match.json", doc.model_dump(mode="json"))
         if out is not src:
             out.unlink(missing_ok=True)          # the blob store has it; the work copy is a second 2 GB
         ctx.artifacts.write_manifest(
-            ref, config={"transcode": bool(ctx.config.get("transcode", True)), "ffmpeg": shutil.which("ffmpeg") is not None},
+            ref, config={"transcode": bool(ctx.config.get("transcode", True)), "remux_h264": bool(ctx.config.get("remux_h264", True)),
+                         "ffmpeg": shutil.which("ffmpeg") is not None, "source_codec": source_info["codec"]},
             inputs=[], capture_mode=m.capture_mode, stage_version=self.version,
             pipeline_version=ctx.pipeline_version, outputs=["match.json", "video.mp4"] + [k[len(ref.prefix):] for k in keyframes],
         )

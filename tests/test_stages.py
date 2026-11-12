@@ -85,3 +85,35 @@ def test_halftime_is_the_long_grassless_gap_in_the_middle(tmp_path, pitch):
     assert ht is not None and ht.method == "grass-gap"
     assert 13_000 <= ht.start_ms <= 16_000 and 25_000 <= ht.end_ms <= 28_000
     assert detect_halftime(clip, info, every_s=2.0, min_break_s=20.0) is None
+
+
+def test_an_h264_source_is_remuxed_not_re_encoded(tmp_path, clip):
+    """A Veo export is H.264 in an MP4 already. Re-encoding it was the hour
+    in S0; copying the stream into a fresh MP4 is minutes and loses
+    nothing. The synthetic clip is MPEG-4 part 2, so ffmpeg first makes an
+    H.264 copy of it to stand in for the export."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    from sideline.stages.s0_ingest import is_h264_mp4
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("needs ffmpeg")
+    h264 = tmp_path / "export.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(clip), "-c:v", "libx264", "-pix_fmt", "yuv420p", str(h264)], check=True)
+    assert is_h264_mp4(h264, probe(h264)) and not is_h264_mp4(clip, probe(clip))
+    seen = []
+    ctx = _ctx(tmp_path, h264)
+    ctx.progress = lambda f, d: seen.append(d)
+    ref = STAGES["s0_ingest"].run(ctx)
+    doc = ctx.artifacts.read_json(ref, "match.json")
+    assert doc["remuxed"] is True and doc["transcoded"] is False and doc["frame_count"] == 75
+    assert any(d.startswith("copying the video stream") for d in seen) and not any(d.startswith("transcoding") for d in seen)
+    man = ctx.artifacts.read_manifest(ref)
+    assert man["config"]["source_codec"] in ("avc1", "h264") and man["config"]["remux_h264"] is True
+    # The MPEG-4 clip still goes through the encoder.
+    ctx2 = _ctx(tmp_path / "b", clip)
+    doc2 = ctx2.artifacts.read_json(STAGES["s0_ingest"].run(ctx2), "match.json")
+    assert doc2["transcoded"] is True and doc2["remuxed"] is False

@@ -87,8 +87,11 @@ same network, phone included. The landing page lists the matches with
 where each has got to, and takes new film: a video file, or a direct link
 to one that the server fetches (a Veo match page is not the file; the
 tagger's README says how to get the direct link). Ingest and sampling run
-in the background on the machine serving the page; detection needs the
-model and a GPU, so by default it is left for the GPU machine:
+in the background on the machine serving the page, and the list shows how
+far each step has got. A Veo export is H.264 already, so ingest copies its
+stream into a fresh MP4 in a minute or two rather than re-encoding it for
+an hour; anything else is transcoded. Detection needs the model and a GPU,
+so by default it is left for the GPU machine:
 
 ```
 rsync -a sideline@<homelab>:/srv/sideline/data/ ./data/      # bring the match over
