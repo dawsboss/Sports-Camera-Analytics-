@@ -46,3 +46,26 @@ def test_local_store_refuses_keys_outside_root(tmp_path):
     blobs.put("a/b.txt", b"hi")
     assert blobs.get("a/b.txt") == b"hi" and blobs.exists("a/b.txt") and not blobs.exists("a/c.txt")
     assert blobs.list("a") == ["a/b.txt"] and blobs.local_path("a/b.txt") is not None
+
+
+def test_children_lists_one_level_and_skips_unfinished(tmp_path):
+    blobs = LocalBlobStore(tmp_path)
+    blobs.put("m/s1/v001/frames/0000001.jpg", b"x")
+    blobs.put("m/s1/v001/manifest.json", b"{}")
+    blobs.put("m/s1/top.txt", b"x")
+    (tmp_path / "m/s1/v002").mkdir()
+    (tmp_path / "m/s1/v002/video.mp4.part").write_bytes(b"x")
+    (tmp_path / "m/s1/v003").mkdir()
+    assert blobs.children("m/s1/") == ["top.txt", "v001"]
+    assert blobs.children("m/nothing/") == []
+
+
+def test_versions_ignore_a_version_with_only_partial_files(tmp_path):
+    blobs = LocalBlobStore(tmp_path)
+    store = ArtifactStore(blobs)
+    v1 = store.new_version("m", "s0_ingest")
+    store.write_json(v1, "match.json", {"a": 1})
+    (tmp_path / "matches/m/s0_ingest/v002").mkdir()
+    (tmp_path / "matches/m/s0_ingest/v002/video.mp4.part").write_bytes(b"x")
+    assert store.versions("m", "s0_ingest") == [1]
+    assert store.new_version("m", "s0_ingest").version == 2

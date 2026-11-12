@@ -52,9 +52,8 @@ class ArtifactStore:
     def versions(self, match_id: str, stage: str) -> list[int]:
         prefix = f"matches/{match_id}/{stage}/"
         seen = set()
-        for key in self.blobs.list(prefix):
-            rest = key[len(prefix):].split("/", 1)[0]
-            m = _VERSION.match(rest)
+        for name in self.blobs.children(prefix):
+            m = _VERSION.match(name)
             if m:
                 seen.add(int(m.group(1)))
         return sorted(seen)

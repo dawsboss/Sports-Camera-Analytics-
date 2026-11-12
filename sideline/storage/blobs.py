@@ -9,6 +9,7 @@ ever tells it otherwise.
 from __future__ import annotations
 
 import io
+import os
 import shutil
 from pathlib import Path
 from typing import Iterable, Optional, Protocol
@@ -26,7 +27,17 @@ class BlobStore(Protocol):
     def get_to_file(self, key: str, path: Path) -> Path: ...
     def exists(self, key: str) -> bool: ...
     def list(self, prefix: str) -> list[str]: ...
+    def children(self, prefix: str) -> list[str]: ...
     def local_path(self, key: str) -> Optional[Path]: ...
+
+
+def _holds_a_finished_blob(d: Path) -> bool:
+    """Top-down, so a version directory answers from its own manifest
+    before anything opens its frames directory."""
+    for _, _, files in os.walk(d):
+        if any(not f.endswith(".part") for f in files):
+            return True
+    return False
 
 
 class LocalBlobStore:
@@ -106,6 +117,23 @@ class LocalBlobStore:
         for p in base.rglob("*"):
             if p.is_file() and not p.name.endswith(".part"):
                 out.append(p.relative_to(self.root).as_posix())
+        return sorted(out)
+
+    def children(self, prefix: str) -> list[str]:
+        """The names one level under `prefix` that hold at least one finished
+        blob, without walking everything beneath them: a version directory
+        of cached frames holds tens of thousands of files, and the review
+        page asks for the latest version on every frame it shows."""
+        base = self._path(prefix.rstrip("/")) if prefix else self.root
+        if not base.is_dir():
+            return []
+        out = []
+        for d in base.iterdir():
+            if d.is_file():
+                if not d.name.endswith(".part"):
+                    out.append(d.name)
+            elif _holds_a_finished_blob(d):
+                out.append(d.name)
         return sorted(out)
 
     def local_path(self, key: str) -> Optional[Path]:
@@ -191,6 +219,13 @@ class MinioBlobStore:
 
     def list(self, prefix: str) -> list[str]:
         return sorted(o.object_name for o in self.client.list_objects(self.bucket, prefix=prefix, recursive=True))
+
+    def children(self, prefix: str) -> list[str]:
+        if prefix and not prefix.endswith("/"):
+            prefix += "/"
+        names = {o.object_name[len(prefix):].rstrip("/")
+                 for o in self.client.list_objects(self.bucket, prefix=prefix, recursive=False)}
+        return sorted(n for n in names if n)
 
     def local_path(self, key: str) -> Optional[Path]:
         return None
