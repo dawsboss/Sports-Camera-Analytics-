@@ -113,8 +113,9 @@ class EventDecision(Base):
     wrong taker, or not an event at all. An event has no id of its own, so
     it is keyed by the events version it sits in and its time, which is
     unique within a version because dead balls closer than two seconds are
-    merged. A new events version starts with no verdicts; replaying these
-    onto it by time is a later S8's job, never an edit to the Parquet."""
+    merged. A new events version starts with no rows of its own; these
+    are read through it by time (`sideline/verdicts.py`), never copied
+    or rewritten, and never an edit to the Parquet."""
 
     __tablename__ = "event_decisions"
 

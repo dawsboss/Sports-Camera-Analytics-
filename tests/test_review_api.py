@@ -80,6 +80,32 @@ def test_verdicts_are_rows_and_the_newest_shows_on_the_event(reviewed):
     assert c.post("/matches/nope/review/decisions", json={**key, "verdict": "right"}).status_code == 404
 
 
+def test_a_rerun_shows_the_old_verdicts_as_carried_and_a_new_one_wins(reviewed):
+    """A re-run of S8 is a new events version with no rows of its own. The
+    verdicts given on the old one are not lost and not rewritten: the page
+    reads them through the new version, marked as carried."""
+    c, match_id = reviewed
+    doc = c.get(f"/matches/{match_id}/review").json()
+    e = doc["events"][0]
+    r = c.post(f"/matches/{match_id}/review/decisions",
+               json={"events_version": 1, "t_ms": e["t_ms"], "verdict": "wrong_type", "corrected_type": "free_kick", "decided_by": "g"})
+    assert r.status_code == 201
+    assert c.post(f"/matches/{match_id}/jobs", params={"stages": "s8_events"}).status_code == 201
+    doc = c.get(f"/matches/{match_id}/review").json()
+    assert doc["events_version"] == 2 and len(doc["events"]) == 1
+    d = doc["events"][0]["decision"]
+    assert d["verdict"] == "wrong_type" and d["corrected_type"] == "free_kick" and d["decided_by"] == "g"
+    assert d["carried_from"] == {"events_version": 1, "t_ms": e["t_ms"]}
+    # The row itself still belongs to version 1.
+    assert [x["events_version"] for x in c.get(f"/matches/{match_id}/review/decisions").json()] == [1]
+    # A verdict given on the new version is hers on this version, and wins.
+    r = c.post(f"/matches/{match_id}/review/decisions",
+               json={"events_version": 2, "t_ms": doc["events"][0]["t_ms"], "verdict": "right", "decided_by": "g"})
+    assert r.status_code == 201
+    d = c.get(f"/matches/{match_id}/review").json()["events"][0]["decision"]
+    assert d["verdict"] == "right" and d["carried_from"] is None
+
+
 def test_naming_the_taker_is_an_identity_decision_on_the_track(reviewed):
     c, match_id = reviewed
     doc = c.get(f"/matches/{match_id}/review").json()

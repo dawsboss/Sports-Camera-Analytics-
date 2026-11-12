@@ -34,6 +34,7 @@ from sideline.stages.s8_events import clock
 from sideline.storage.artifacts import ArtifactRef, ArtifactStore
 from sideline.storage.blobs import ImmutableWriteError
 from sideline.timeline import periods_from_sm
+from sideline.verdicts import carry, seen
 
 VERDICTS = ("right", "wrong_type", "wrong_taker", "not_event")
 # The page must not reach anything but this API, and a script that slipped
@@ -442,6 +443,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             sport, roster, periods_node, kickoff = m.sport, m.roster, m.periods, m.kickoff_offset_ms
             decisions = (s.query(EventDecision).filter_by(match_id=match_id, events_version=s8.version)
                          .order_by(EventDecision.decided_at).all()) if s8 else []
+            # Verdicts given on earlier events versions, newest version
+            # first, each as its newest verdict per event: {version: {t_ms: verdict}}.
+            earlier: dict[int, dict[int, dict]] = {}
+            for d in (s.query(EventDecision).filter(EventDecision.match_id == match_id,
+                                                    EventDecision.events_version < s8.version)
+                      .order_by(EventDecision.decided_at).all()) if s8 else []:
+                earlier.setdefault(d.events_version, {})[d.t_ms] = {
+                    "verdict": d.verdict, "corrected_type": d.corrected_type, "corrected_track": d.corrected_track,
+                    "decided_by": d.decided_by, "decided_at": d.decided_at.isoformat(), "note": d.note}
             # A name belongs to a track of one tracking version; the same id
             # in a re-run is a different player. Only this version's names apply.
             names = {d.track_id: d.player_id for d in s.query(ReviewDecision)
@@ -459,6 +469,25 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             latest: dict[int, EventDecision] = {}
             for d in decisions:
                 latest[d.t_ms] = d                    # the newest verdict per event wins
+            # A re-run starts a new version; what was said about the old
+            # one is read through it by time and shown as carried. The
+            # rows stay where they were given (`sideline/verdicts.py`).
+            carried: dict[int, dict] = {}
+            now = seen(rows, log)
+            for version in sorted(earlier, reverse=True):
+                old_ref = ArtifactRef(match_id, "s8_events", version)
+                if not store.complete(old_ref):
+                    continue
+                was = {e.t_ms: e for e in seen(store.read_table(old_ref, "events.parquet").to_pylist(),
+                                              store.read_json(old_ref, "dead_balls.json"))}
+                pairs = [(was[t], v) for t, v in earlier[version].items() if t in was]
+                same_tracks = _tracks_version_of(store.read_manifest(old_ref)) == tracks_version
+                for t, c in carry(pairs, [e for e in now if e.t_ms not in latest and e.t_ms not in carried], same_tracks).items():
+                    given = earlier[version][c["from_t_ms"]]
+                    carried[t] = {"verdict": c["verdict"], "corrected_type": c["corrected_type"],
+                                  "corrected_track": c["corrected_track"], "decided_by": given["decided_by"],
+                                  "decided_at": given["decided_at"], "note": given["note"],
+                                  "carried_from": {"events_version": version, "t_ms": c["from_t_ms"]}}
             for r, l in zip(rows, log):
                 label, basis = clock(r["t_ms"], kickoff, periods)
                 d = latest.get(r["t_ms"])
@@ -467,9 +496,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     "confidence": round(r["confidence"], 2), "reason": l["call"]["reason"],
                     "taker_track": r["track_id"], "player_id": r["player_id"] or names.get(r["track_id"]),
                     "team": r["team"], "cues": {k: l[k] for k in ("held", "still_s", "nearest_h", "n_near", "extreme_h", "landmarks_h", "release_speed_h")},
-                    "decision": None if d is None else {
+                    "decision": carried.get(r["t_ms"]) if d is None else {
                         "verdict": d.verdict, "corrected_type": d.corrected_type, "corrected_track": d.corrected_track,
-                        "decided_by": d.decided_by, "decided_at": d.decided_at.isoformat(), "note": d.note},
+                        "decided_by": d.decided_by, "decided_at": d.decided_at.isoformat(), "note": d.note,
+                        "carried_from": None},
                 })
         return {
             "match": {"id": match_id, "sport": sport, "capture_mode": match_json.get("capture_mode"),
