@@ -61,11 +61,14 @@ def job_progress(settings: Settings, job_id: str, every_s: float = 2.0) -> Calla
         if fraction < 1.0 and now - last["t"] < every_s:
             return
         last["t"] = now
-        with session_scope(engine) as s:
-            job = s.get(Job, job_id)
-            if job is not None:
-                job.progress = max(0.0, min(1.0, float(fraction)))
-                job.detail = (detail or "")[:255]
+        try:
+            with session_scope(engine) as s:
+                job = s.get(Job, job_id)
+                if job is not None:
+                    job.progress = max(0.0, min(1.0, float(fraction)))
+                    job.detail = (detail or "")[:255]
+        except Exception:                 # a locked database loses one progress tick, never the stage
+            pass
 
     return report
 

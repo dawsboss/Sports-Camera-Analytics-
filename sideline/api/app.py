@@ -32,6 +32,7 @@ from sideline.sports import get_sport
 from sideline.stages import DEFAULT_STAGES, ORDER
 from sideline.stages.s8_events import clock
 from sideline.storage.artifacts import ArtifactRef, ArtifactStore
+from sideline.storage.blobs import ImmutableWriteError
 from sideline.timeline import periods_from_sm
 
 VERDICTS = ("right", "wrong_type", "wrong_taker", "not_event")
@@ -41,6 +42,76 @@ VERDICTS = ("right", "wrong_type", "wrong_taker", "not_event")
 # page's own single file.
 REVIEW_CSP = ("default-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; "
               "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
+
+
+class UploadIncomplete(ValueError):
+    """The body ended before its declared length, or was empty."""
+
+
+async def stream_body_to_blob(blobs, key: str, body, content_type: str, expected: Optional[int]) -> int:
+    """Hand an incoming body to the blob store chunk by chunk from a writer
+    thread, so the request loop is never blocked on disk and the writer
+    never holds more than a few chunks. Any failure on either side, a
+    dropped client included, reaches the other: the writer gets a poison
+    pill that raises inside its iterator, so `put_stream` removes its
+    `.part` and no blob is left; a writer that fails early is noticed by
+    the producer within a second rather than hanging it. Returns the bytes
+    written."""
+    loop = asyncio.get_running_loop()
+    q: "asyncio.Queue[object]" = asyncio.Queue(maxsize=4)
+    done: "asyncio.Future[int]" = loop.create_future()
+    END = object()
+
+    def consume() -> None:
+        def gen():
+            total = 0
+            while True:
+                item = asyncio.run_coroutine_threadsafe(q.get(), loop).result()
+                if item is END:
+                    if total == 0:
+                        raise UploadIncomplete("the upload was empty")
+                    if expected is not None and total != expected:
+                        raise UploadIncomplete(f"the upload ended after {total} of {expected} bytes")
+                    return
+                if isinstance(item, BaseException):
+                    raise item
+                total += len(item)
+                yield item
+        try:
+            n = blobs.put_stream(key, gen(), content_type)
+            loop.call_soon_threadsafe(done.set_result, n)
+        except BaseException as e:
+            loop.call_soon_threadsafe(done.set_exception, e)
+
+    threading.Thread(target=consume, name="sideline-upload", daemon=True).start()
+
+    async def hand(item) -> None:
+        # Offer to the writer, but notice if it has died and raise its reason.
+        while True:
+            try:
+                await asyncio.wait_for(q.put(item), timeout=1.0)
+                return
+            except asyncio.TimeoutError:
+                if done.done():
+                    done.result()
+
+    try:
+        async for chunk in body:
+            if chunk:
+                await hand(chunk)
+        await hand(END)
+    except BaseException as e:
+        if not done.done():
+            try:
+                await asyncio.wait_for(q.put(e if isinstance(e, Exception) else UploadIncomplete(str(e))), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
+            try:
+                await asyncio.wait_for(asyncio.shield(done), timeout=30.0)
+            except BaseException:
+                pass
+        raise
+    return await done
 
 
 def web_dir() -> Path:
@@ -111,6 +182,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app.state.engine = build_engine(settings)
     app.state.blobs = build_blobs(settings)
     app.state.artifacts = ArtifactStore(app.state.blobs)
+    app.state.uploading = set()          # matches whose video is arriving right now
 
     def artifacts(request: Request) -> ArtifactStore:
         return request.app.state.artifacts
@@ -225,57 +297,40 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         """The video for a match created without one, streamed as the raw
         request body into the blob store as it arrives: no multipart
         parsing, no spool, no copy, flat memory however large the match.
-        The browser sends this after the metadata, and the stages queue
-        when the last byte lands."""
+        The browser sends this after the details, and the stages queue when
+        the last byte lands. A dropped connection, a short body or a second
+        upload for the same match leaves no blob behind."""
         store: ArtifactStore = request.app.state.artifacts
-        with session_scope(request.app.state.engine) as s:
-            m = s.get(Match, match_id)
-            if m is None:
-                raise HTTPException(404, "no such match")
-            if m.source_key and request.app.state.blobs.exists(m.source_key):
-                raise HTTPException(409, "this match already has its video")
+        blobs = request.app.state.blobs
         name = Path(filename).name or "match.mp4"
         key = f"matches/{match_id}/source/{name}"
         wanted = [x for x in (stages or ",".join(DEFAULT_STAGES)).split(",") if x] if run else []
         unknown = [x for x in wanted if x not in ORDER]
         if unknown:
             raise HTTPException(422, f"unknown stages {unknown}; known: {ORDER}")
-        total = 0
-        # The body is read in the request's own loop; a thread writes the
-        # chunks into the blob store as they come, so the only memory in
-        # play is a few chunks.
-        blobs = request.app.state.blobs
-        q: "asyncio.Queue[Optional[bytes]]" = asyncio.Queue(maxsize=4)
-        loop = asyncio.get_running_loop()
-        done = loop.create_future()
-
-        def consume():
-            def gen():
-                while True:
-                    chunk = asyncio.run_coroutine_threadsafe(q.get(), loop).result()
-                    if chunk is None:
-                        return
-                    yield chunk
-            try:
-                n = blobs.put_stream(key, gen(), request.headers.get("content-type") or "video/mp4")
-                loop.call_soon_threadsafe(done.set_result, n)
-            except BaseException as e:
-                loop.call_soon_threadsafe(done.set_exception, e)
-
-        worker = threading.Thread(target=consume, name="sideline-upload", daemon=True)
-        worker.start()
-        try:
-            async for chunk in request.stream():
-                if chunk:
-                    total += len(chunk)
-                    await q.put(chunk)
-            await q.put(None)
-            written = await done
-        except Exception:
-            await q.put(None)
-            raise
-        if written == 0:
+        length = request.headers.get("content-length")
+        expected = int(length) if length and length.isdigit() else None
+        if expected == 0:
             raise HTTPException(422, "the upload was empty")
+        uploading: set = request.app.state.uploading
+        with session_scope(request.app.state.engine) as s:
+            m = s.get(Match, match_id)
+            if m is None:
+                raise HTTPException(404, "no such match")
+            # Its video is whatever already sits under source/, finished or
+            # still arriving; a match gets one.
+            if blobs.list(f"matches/{match_id}/source/") or match_id in uploading:
+                raise HTTPException(409, "this match already has its video")
+        uploading.add(match_id)
+        try:
+            written = await stream_body_to_blob(blobs, key, request.stream(),
+                                                request.headers.get("content-type") or "video/mp4", expected)
+        except ImmutableWriteError:
+            raise HTTPException(409, "this match already has its video")
+        except UploadIncomplete as e:
+            raise HTTPException(422, str(e))
+        finally:
+            uploading.discard(match_id)
         with session_scope(request.app.state.engine) as s:
             m = s.get(Match, match_id)
             m.source_key = key

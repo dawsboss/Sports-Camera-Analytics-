@@ -69,12 +69,18 @@ class LocalBlobStore:
             raise ImmutableWriteError(key)
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(p.suffix + ".part")
+        try:
+            out = tmp.open("xb")          # exclusive: a second writer of this key fails here, not later
+        except FileExistsError:
+            raise ImmutableWriteError(f"{key} is being written")
         total = 0
         try:
-            with tmp.open("wb") as out:
+            with out:
                 for chunk in chunks:
                     out.write(chunk)
                     total += len(chunk)
+            if p.exists():
+                raise ImmutableWriteError(key)
             tmp.replace(p)
         except BaseException:
             tmp.unlink(missing_ok=True)

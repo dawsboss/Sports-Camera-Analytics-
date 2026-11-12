@@ -241,3 +241,82 @@ def test_s0_reports_transcode_progress_when_ffmpeg_is_there(tmp_path, clip):
     assert fractions == sorted(fractions) and fractions[-1] == 1.0 and seen[-1][1] == "ingested"
     if _sh.which("ffmpeg"):
         assert any(d.startswith("transcoding") for _, d in seen), seen
+
+
+def test_a_broken_or_short_upload_leaves_no_blob_and_can_be_retried(tmp_path):
+    import asyncio
+
+    from sideline.api.app import UploadIncomplete, stream_body_to_blob
+    from sideline.storage import LocalBlobStore
+
+    store = LocalBlobStore(tmp_path / "blobs")
+
+    async def body(parts, fail_after=None):
+        for i, p in enumerate(parts):
+            if fail_after is not None and i == fail_after:
+                raise ConnectionError("client went away")
+            yield p
+
+    async def go():
+        # The client drops mid-stream: nothing lands, the key stays free.
+        with pytest.raises(ConnectionError):
+            await stream_body_to_blob(store, "m/source/a.mp4", body([b"abc", b"def", b"ghi"], fail_after=2), "video/mp4", 9)
+        assert not store.exists("m/source/a.mp4") and not list((tmp_path / "blobs").rglob("*.part"))
+        # The body ends short of its declared length: refused, nothing lands.
+        with pytest.raises(UploadIncomplete):
+            await stream_body_to_blob(store, "m/source/a.mp4", body([b"abc"]), "video/mp4", 9)
+        assert not store.exists("m/source/a.mp4")
+        # Empty: refused.
+        with pytest.raises(UploadIncomplete):
+            await stream_body_to_blob(store, "m/source/a.mp4", body([]), "video/mp4", None)
+        # Then the retry works, and a second write of the key is refused before it starts.
+        assert await stream_body_to_blob(store, "m/source/a.mp4", body([b"abc", b"def"]), "video/mp4", 6) == 6
+        assert store.get("m/source/a.mp4") == b"abcdef"
+        from sideline.storage import ImmutableWriteError
+        with pytest.raises(ImmutableWriteError):
+            await stream_body_to_blob(store, "m/source/a.mp4", body([b"x"]), "video/mp4", 1)
+        # A writer that fails at once does not hang the producer.
+        slow = store
+        with pytest.raises(ImmutableWriteError):
+            await asyncio.wait_for(stream_body_to_blob(slow, "m/source/a.mp4", body([b"x"] * 50), "video/mp4", 50), timeout=20)
+
+    asyncio.run(go())
+
+
+def test_two_writers_of_one_key_cannot_interleave(tmp_path):
+    from sideline.storage import ImmutableWriteError, LocalBlobStore
+
+    store = LocalBlobStore(tmp_path / "blobs")
+    started = __import__("threading").Event()
+    release = __import__("threading").Event()
+
+    def slow():
+        yield b"first"
+        started.set()
+        release.wait(10)
+        yield b"-done"
+
+    t = __import__("threading").Thread(target=lambda: store.put_stream("k/v.bin", slow()))
+    t.start()
+    assert started.wait(5)
+    with pytest.raises(ImmutableWriteError, match="being written"):
+        store.put_stream("k/v.bin", iter([b"second"]))
+    release.set()
+    t.join(10)
+    assert store.get("k/v.bin") == b"first-done"
+
+
+def test_a_match_takes_one_video_even_under_two_names(tmp_path, clip):
+    settings = Settings(data_dir=tmp_path / "data", inline_jobs=True)
+    with TestClient(create_app(settings)) as c:
+        mid = c.post("/matches", data={"capture_mode": "followcam"}).json()["id"]
+        data = clip.read_bytes()
+        assert c.put(f"/matches/{mid}/source", params={"filename": "a.mp4"}, content=data).status_code == 200
+        assert c.put(f"/matches/{mid}/source", params={"filename": "b.mp4"}, content=data).status_code == 409
+        # A declared length the body does not reach is refused and leaves nothing.
+        mid2 = c.post("/matches", data={"capture_mode": "followcam"}).json()["id"]
+        r = c.put(f"/matches/{mid2}/source", params={"filename": "c.mp4"}, content=data[:1000],
+                  headers={"Content-Length": str(len(data))})
+        assert r.status_code in (422, 400), r.text
+        assert c.get(f"/matches/{mid2}").json()["original_filename"] is None
+        assert c.put(f"/matches/{mid2}/source", params={"filename": "c.mp4"}, content=data).status_code == 200

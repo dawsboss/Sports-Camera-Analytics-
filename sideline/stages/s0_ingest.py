@@ -156,7 +156,7 @@ class IngestStage:
         video_key = ref.key("video.mp4")
         ctx.progress(0.86, "storing the transcoded video")
         ctx.blobs.put_file(video_key, out, "video/mp4")
-        ctx.progress(0.9, "looking for half-time")
+        ctx.progress(0.9, "looking for the break in play")
         halftime = detect_halftime(out, info) if ctx.config.get("detect_halftime", True) else None
         ctx.progress(0.95, "writing keyframes")
         keyframes = write_keyframes(ctx, ref, out, info, every_s=float(ctx.config.get("keyframe_every_s", 60.0)))
@@ -170,10 +170,10 @@ class IngestStage:
         ctx.artifacts.write_json(ref, "match.json", doc.model_dump(mode="json"))
         if out is not src:
             out.unlink(missing_ok=True)          # the blob store has it; the work copy is a second 2 GB
-        ctx.progress(1.0, "ingested")
         ctx.artifacts.write_manifest(
             ref, config={"transcode": bool(ctx.config.get("transcode", True)), "ffmpeg": shutil.which("ffmpeg") is not None},
             inputs=[], capture_mode=m.capture_mode, stage_version=self.version,
             pipeline_version=ctx.pipeline_version, outputs=["match.json", "video.mp4"] + [k[len(ref.prefix):] for k in keyframes],
         )
+        ctx.progress(1.0, "ingested")           # after the manifest: done means committed
         return ref
