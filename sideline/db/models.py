@@ -54,6 +54,7 @@ class Match(Base):
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="match", cascade="all, delete-orphan")
     runs: Mapped[list["StageRun"]] = relationship(back_populates="match", cascade="all, delete-orphan")
+    marks: Mapped[list["PeriodMark"]] = relationship(cascade="all, delete-orphan", order_by="PeriodMark.t_ms")
 
 
 class Job(Base):
@@ -133,3 +134,22 @@ class EventDecision(Base):
     decided_by: Mapped[str] = mapped_column(String(128))
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class PeriodMark(Base):
+    """A moment a reviewer marked on the film as the start of a period, a
+    break between periods, or the end of the match. The kickoff typed at
+    upload is one number and the minutes app's periods are a phone's
+    clock; these are what somebody saw on the film, in video time, so
+    where they exist they are the periods (`timeline.periods_from_marks`).
+    A mark set by mistake is deleted: it is the reviewer's own input, not
+    something the pipeline wrote."""
+
+    __tablename__ = "period_marks"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    match_id: Mapped[str] = mapped_column(ForeignKey("matches.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(8))              # start | break | end
+    t_ms: Mapped[int] = mapped_column(Integer)                # video time
+    decided_by: Mapped[str] = mapped_column(String(128))
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

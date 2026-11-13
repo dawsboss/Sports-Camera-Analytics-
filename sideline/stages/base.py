@@ -22,6 +22,7 @@ class MatchRecord:
     pitch_width: float = 68.0
     kickoff_offset_ms: Optional[int] = None
     periods: Optional[dict] = None      # soccer-manager's periods node, copied at upload
+    marks: Optional[list] = None        # what a reviewer marked on the film: [{"kind": start|break|end, "t_ms": video ms}]
 
 
 @dataclass

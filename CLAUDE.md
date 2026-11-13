@@ -254,6 +254,41 @@ what surrounded it in heights of the taker, never in metres or pixels.
   S6 does not exist. Scoring a run against the verdicts was done by hand
   for S8 0.2.0 and belongs in `spike/evals` beside `restarts_on_taps.py`.
   There is no login; `decided_by` is whatever the reviewer typed.
+- **Periods can be marked on the film, and play that had stopped is not
+  searched for restarts.** The review page has a button for the start of
+  a period, the break between periods and the end, in the sport's words
+  (`EventGrammar.period_words`); each stamps the frame on screen as a
+  `PeriodMark` row. Where marks exist they are the periods
+  (`timeline.periods_from_marks`): the page's clock, which events it
+  shows as out of play, and on its next run S8's period starts and the
+  breaks it drops dead balls in. The kickoff typed at upload opens the
+  first period unless a start was marked. S8 0.4.0 also finds breaks in
+  the tracking (`find_breaks`: fewer people moving than 0.4 of the usual
+  number for three minutes) and drops dead balls inside them, without
+  taking one as a period start.
+  - On the second full match (31 October film, 313 events, S8 0.3.0) the
+    owner reviewed 295: 179 not an event, 116 real, 2 right as written.
+    His taker corrections say why. In 56 of the real ones the taker he
+    tapped stood more than three heights from the ball the event was
+    found on: a spare ball or a bag by the far bench, or something among
+    the spectators, with the restart in the clip by chance. In 59 the
+    event was on the match ball, and its taker was right in 41. Of the
+    false ones 25 were half-time or after the last whistle, 49 on objects
+    away from the centre of the crop, 103 on the match ball in open play.
+  - The break in the tracking is 35:30 to 39:30 there and 40:30 to 45:00
+    on the first match: 8 and 7 events dropped, no real one. His marks
+    (half-time 34:00, kick-off 40:15, the end 72:00) drop 26, lose none,
+    and name the second kick-off.
+  - Three rules were scored against those verdicts and not kept. A ball
+    that travelled six heights to its spot in the five seconds before it
+    rested (open play): 55 false and 12 real dropped there, 4 false and
+    10 real on the first match's verdicts. Candidates away from the
+    centre of the crop: 48 false dropped and 32 real restarts gone from
+    the list, and a follow-cam cue besides. The camera's motion from the
+    background (phase correlation, people blanked) in place of the people
+    estimate: 29 false and 17 real dropped and 50 events nobody has
+    reviewed. The limit on this footage is which object the detector
+    calls the ball, not the rules that read it.
 - No S4 team assignment, S6 identity, S8 stats or S9 publish; S7 review
   exists for events only. `contracts.py` already defines what they write.
   Events carry the taker as a `track_id`; the name arrives as a review

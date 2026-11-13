@@ -258,6 +258,17 @@ class SoccerPlugin:
             # and the detector misses one or two samples at a time on
             # either real match (worst run 15, which this does not bridge).
             possession_carry_s=1.5,
+            # Half-time, read from the people. On the two reviewed matches
+            # 10 to 16 people a sample were moving during play (a quarter of
+            # a height a second is a slow walk, 0.4 m/s) and 0 to 4 through
+            # the break, which lasted four and a half and six and a half
+            # minutes; the longest other lull on either was under two. On
+            # the second match all 20 events inside the break had been
+            # marked "not an event".
+            moving_h=0.25,
+            break_min_s=180.0,
+            break_moving_frac=0.4,
+            period_words={"start": "Kick off", "break": "Half time", "end": "End"},
         )
 
     def stat_definitions(self) -> Sequence[StatDefinition]:

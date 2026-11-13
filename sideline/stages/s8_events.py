@@ -35,6 +35,7 @@ from sideline.contracts import EVENTS_SCHEMA
 from sideline.events import (
     camera_shifts_from_people,
     camera_shifts_from_registration,
+    find_breaks,
     find_dead_balls,
     frames_from_rows,
     merge_shifts,
@@ -43,7 +44,7 @@ from sideline.possession import find_possessions, possession_doc
 from sideline.sports import get_sport
 from sideline.stages.base import StageContext
 from sideline.storage.artifacts import ArtifactRef
-from sideline.timeline import match_seconds, period_starts_video_ms, periods_from_sm
+from sideline.timeline import MARK_SLACK_MS, breaks_between, match_seconds, period_starts_video_ms, periods_from_marks, periods_from_sm
 
 
 def clock(t_ms: int, kickoff_offset_ms, periods) -> tuple[str, str]:
@@ -74,7 +75,7 @@ def write_log(rows: list[dict], kickoff_offset_ms, periods) -> str:
 
 class EventsStage:
     name = "s8_events"
-    version = "0.3.0"
+    version = "0.4.0"
 
     def run(self, ctx: StageContext) -> ArtifactRef:
         m = ctx.match
@@ -91,25 +92,28 @@ class EventsStage:
         object_classes = [c.name for c in sport.entity_classes() if c.object]
         landmark_classes = [c.name for c in sport.entity_classes() if c.landmark]
 
-        # Period starts in video time, through the timeline: the kickoff the
-        # coach supplied and the periods the minutes app recorded, copied at
-        # upload. Without those, S0's half-time hint stands in for the
-        # second period; without a kickoff offset there is no period context
-        # and no kick-off can be named.
+        # Period starts in video time. What a reviewer marked on the film
+        # comes first: she saw the kick-offs. Otherwise the timeline: the
+        # kickoff the coach supplied and the periods the minutes app
+        # recorded, copied at upload; without those, S0's half-time hint
+        # stands in for the second period; without a kickoff offset there
+        # is no period context and no kick-off can be named.
         starts: list[int] = []
         source = "none"
-        if match.get("kickoff_offset_ms") is not None:
-            k0 = int(match["kickoff_offset_ms"])
-            periods = periods_from_sm(m.periods or {})
-            if periods:
-                starts, source = period_starts_video_ms(k0, periods), "periods"
+        kickoff, clock_periods = match.get("kickoff_offset_ms"), periods_from_sm(m.periods or {})
+        marked = periods_from_marks(m.marks or [], kickoff)
+        if marked is not None:
+            kickoff, clock_periods = marked
+            starts, source = [p.start_ms for p in clock_periods], "marks"
+        elif kickoff is not None:
+            k0 = int(kickoff)
+            if clock_periods:
+                starts, source = period_starts_video_ms(k0, clock_periods), "periods"
             else:
                 starts, source = [k0], "kickoff"
                 if match.get("halftime"):
                     starts.append(int(match["halftime"]["end_ms"]))
                     source = "kickoff+halftime-hint"
-        if ctx.config.get("period_starts_ms"):
-            starts, source = [int(x) for x in ctx.config["period_starts_ms"]], "config"
 
         rows = ctx.artifacts.read_table(s3, "fragments.parquet").to_pylist()
         frames = frames_from_rows(rows, object_classes, landmark_classes)
@@ -128,9 +132,25 @@ class EventsStage:
             shifts, from_registration = merge_shifts(camera_shifts_from_registration(frames, h_by_frame, size), people_shifts)
         else:
             shifts = people_shifts
+
+        # Stretches in which play had stopped, and no dead ball in one is a
+        # restart: between the periods a reviewer marked and after the last
+        # of them, and wherever the tracking shows nobody moving for minutes.
+        # The second kind does not say where a period began. On the second
+        # reviewed match the first dead ball after such a break was a false
+        # alarm, forty-five seconds before the kick-off.
+        breaks = find_breaks(frames, grammar, shifts)
+        if marked is not None and frames:
+            # A marked start is where play began again, whatever the people
+            # were still doing: a break the tracking found stops short of it.
+            for s in starts:
+                breaks = [(a, min(b, s - MARK_SLACK_MS)) if a < s <= b + MARK_SLACK_MS else (a, b) for a, b in breaks]
+            breaks = sorted([b for b in breaks if b[1] > b[0]] + breaks_between(clock_periods, frames[-1].t_ms + 1))
+        if ctx.config.get("period_starts_ms"):
+            starts, source = [int(x) for x in ctx.config["period_starts_ms"]], "config"
         dead = find_dead_balls(frames, grammar, size, period_starts_ms=starts,
                                max_gap_samples=int(ctx.config.get("max_gap_samples", 3)),
-                               merge_s=float(ctx.config.get("merge_s", 2.0)), shifts=shifts)
+                               merge_s=float(ctx.config.get("merge_s", 2.0)), shifts=shifts, breaks_ms=breaks)
 
         spells = find_possessions(frames, grammar)
         possession = possession_doc(frames, spells, m.capture_mode)
@@ -149,16 +169,18 @@ class EventsStage:
         ctx.artifacts.write_json(ref, "possession.json", possession)
         csv_rows = [{**e, "reason": l["call"]["reason"]} for e, l in zip(events, log)]
         ctx.artifacts.write_bytes(ref, "events.csv",
-                                  write_log(csv_rows, match.get("kickoff_offset_ms"), periods_from_sm(m.periods or {})).encode(),
+                                  write_log(csv_rows, kickoff, clock_periods).encode(),
                                   "text/csv")
         ctx.artifacts.write_manifest(
             ref, config={"period_starts_ms": starts, "period_source": source,
+                         "breaks_ms": [list(b) for b in breaks],
                          "max_gap_samples": int(ctx.config.get("max_gap_samples", 3)),
                          "merge_s": float(ctx.config.get("merge_s", 2.0)),
                          "grammar": {k: getattr(grammar, k) for k in (
                              "dead_ball_min_s", "still_radius_h", "release_speed_h", "settled_s", "reach_h", "held_rel_y",
                              "held_above_h", "near_h", "object_min_h", "touch_h", "strike_window_s",
-                             "possession_min_s", "possession_carry_s")},
+                             "possession_min_s", "possession_carry_s", "moving_h", "break_min_s",
+                             "break_moving_frac")},
                          "landmark_classes": landmark_classes},
             inputs=[i for i in (s3, s0, s5 if from_registration else None) if i is not None],
             capture_mode=m.capture_mode, stage_version=self.version,

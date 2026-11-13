@@ -6,7 +6,7 @@ sits still and is then thrown or struck."""
 import numpy as np
 import pytest
 
-from sideline.events import Frame, camera_shifts_from_people, find_dead_balls, frames_from_rows
+from sideline.events import Frame, camera_shifts_from_people, find_breaks, find_dead_balls, frames_from_rows
 from sideline.sports import get_sport
 
 SIZE = (1920, 1080)
@@ -464,3 +464,70 @@ def test_whoever_crosses_the_spot_after_the_window_is_not_the_taker(grammar):
             s.ball(k, *spot)
     (d,) = _dead(s, grammar)
     assert d.taker_track == 7
+
+
+def test_a_stretch_with_nobody_moving_is_a_break_whatever_the_camera_does(grammar):
+    """Half-time on a follow-cam: the grass never leaves the frame, the
+    crop keeps panning a little, and the one thing that changes is that
+    nobody is running. Thirty seconds of play, thirty of standing about,
+    thirty of play, with the break made short so the scene stays small."""
+    from dataclasses import replace
+
+    g = replace(grammar, break_min_s=20.0)
+    spots = [(300 + 130 * i, 500 + 15 * (i % 3)) for i in range(10)]
+
+    def scene(pan):
+        s = Scene(pan=pan)
+        for k in range(450):
+            playing = k < 150 or k >= 300
+            jog = 8 * (k % 40 if k % 80 < 40 else 80 - k % 80) if playing else 0   # 0.67 heights a second, there and back
+            # Half jog one way and half the other: all one way would read as the camera panning.
+            s.people(k, [(x + jog * (1 if i % 2 else -1), y) for i, (x, y) in enumerate(spots)])
+        return frames_from_rows(s.rows, ["ball"])
+
+    assert find_breaks(scene(0.0), g, window_s=5.0) == [(30_000, 60_000)]
+    assert find_breaks(scene(3.0), g, window_s=5.0) == [(30_000, 60_000)]
+    # The same lull is not a break when a break must last longer than it did.
+    assert find_breaks(scene(0.0), replace(grammar, break_min_s=40.0), window_s=5.0) == []
+    # And a film in which nobody ever moves has no usual level to fall below.
+    still = Scene()
+    for k in range(200):
+        still.people(k, spots)
+    assert find_breaks(frames_from_rows(still.rows, ["ball"]), g, window_s=5.0) == []
+
+
+def test_nothing_put_back_into_play_inside_a_break_is_an_event(grammar):
+    s = Scene()
+    for k in range(120):
+        s.people(k, [(700, 600), (1200, 600)])
+        s.people(k, [(950, 640)], ids=[9])
+        if k < 10 or 80 <= k < 95:
+            s.ball(k, 960, 650)
+        elif k < 20:
+            s.ball(k, 960 + 90 * (k - 9), 650)
+        elif k >= 95:
+            s.ball(k, 960 + 90 * (k - 94), 650)
+    assert [d.t_ms for d in _dead(s, grammar)] == [10 * DT, 95 * DT]
+    # A ball knocked about at half-time is not a restart; the one struck as the break ends is.
+    assert [d.t_ms for d in _dead(s, grammar, breaks_ms=[(0, 19_000)])] == [95 * DT]
+    assert [d.t_ms for d in _dead(s, grammar, breaks_ms=[(0, 95 * DT)])] == [95 * DT]
+
+
+def test_a_period_is_entered_a_little_before_its_whistle(soccer, grammar):
+    """A period's start is typed or tapped at the kick; the dead ball is
+    timed at when the ball was last seen at rest, which is earlier."""
+    s = Scene()
+    for k in range(60):
+        s.people(k, [(700, 600), (1200, 600), (1000, 400), (1100, 420)])
+        s.people(k, [(950, 640)], ids=[9])
+        if k < 10 or 30 <= k < 45:
+            s.ball(k, 960, 650)
+        elif k < 30:
+            s.ball(k, 960 + 80 * (k - 9), 650)
+        else:
+            s.ball(k, 960 + 80 * (k - 44), 650)
+    dead = _dead(s, grammar, period_starts_ms=[0, 12_000])          # the second release is at 9 s
+    assert [soccer.classify_restart(d).type for d in dead] == ["kick_off", "kick_off"]
+    assert dead[1].since_period_start_s == 0.0
+    late = _dead(s, grammar, period_starts_ms=[0, 15_000])
+    assert [soccer.classify_restart(d).type for d in late] == ["kick_off", "restart"]

@@ -199,3 +199,45 @@ def test_the_page_carries_a_same_origin_policy_and_can_live_where_the_image_puts
     assert "moved" in c.get("/review").text
     monkeypatch.setenv("SIDELINE_WEB_DIR", str(tmp_path / "nowhere"))
     assert c.get("/review").status_code == 404
+
+
+def test_marks_on_the_film_set_the_clock_and_say_what_is_out_of_play(reviewed):
+    """Kick-off, half-time and the end, marked while watching. The event
+    sits at 1.6 s and the kickoff typed at upload is 0.4 s."""
+    c, match_id = reviewed
+    doc = c.get(f"/matches/{match_id}/review").json()
+    assert doc["marks"] == [] and doc["events"][0]["in_play"] is True
+    assert doc["period_words"] == {"start": "Kick off", "break": "Half time", "end": "End"}
+    url = f"/matches/{match_id}/review/marks"
+    assert c.post(url, json={"kind": "kick_off", "t_ms": 1000}).status_code == 422
+    assert c.post(url, json={"kind": "start", "t_ms": -1}).status_code == 422
+    assert c.post("/matches/nope/review/marks", json={"kind": "start", "t_ms": 0}).status_code == 404
+    # Half-time at 1.0 s: the upload's kickoff opens the first period, and the event is in the break.
+    r = c.post(url, json={"kind": "break", "t_ms": 1000, "decided_by": "g"})
+    assert r.status_code == 201 and r.json()["kind"] == "break"
+    doc = c.get(f"/matches/{match_id}/review").json()
+    assert [(k["kind"], k["t_ms"], k["clock"]) for k in doc["marks"]] == [("break", 1000, "00:00")]
+    assert doc["events"][0]["in_play"] is False
+    # The second kick-off at 1.5 s: the event is in the second period, and the clock did not run through the break.
+    start = c.post(url, json={"kind": "start", "t_ms": 1500}).json()
+    e = c.get(f"/matches/{match_id}/review").json()["events"][0]
+    assert e["in_play"] is True and e["clock"] == "00:00" and e["clock_basis"] == "match"
+    # A start marked just after the event still takes it in: the dead ball is timed before the kick.
+    c.delete(f"{url}/{start['id']}")
+    late = c.post(url, json={"kind": "start", "t_ms": 3000}).json()
+    assert c.get(f"/matches/{match_id}/review").json()["events"][0]["in_play"] is True
+    c.delete(f"{url}/{late['id']}")
+    # The end before it: out of play again. A mark taken back is gone.
+    end = c.post(url, json={"kind": "end", "t_ms": 1200}).json()
+    doc = c.get(f"/matches/{match_id}/review").json()
+    assert doc["events"][0]["in_play"] is False and [k["kind"] for k in doc["marks"]] == ["break", "end"]
+    assert c.delete(f"{url}/{end['id']}").status_code == 200
+    assert c.delete(f"{url}/{end['id']}").status_code == 404
+    assert [k["kind"] for k in c.get(f"/matches/{match_id}/review").json()["marks"]] == ["break"]
+    # The events stage reads the marks the next time it runs: the one event is in the break, and is not written.
+    assert c.post(f"/matches/{match_id}/jobs", params={"stages": "s8_events"}).status_code == 201
+    doc = c.get(f"/matches/{match_id}/review").json()
+    assert doc["events_version"] == 2 and doc["events"] == []
+    man = c.get(f"/matches/{match_id}/artifacts/s8_events/2/manifest.json").json()
+    assert man["config"]["period_source"] == "marks" and man["config"]["period_starts_ms"] == [400]
+    assert man["config"]["breaks_ms"][0][0] == 1000          # from half-time to the end of the film

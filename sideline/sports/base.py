@@ -120,6 +120,10 @@ class EventGrammar:
     touch_h: float                   # the ball this close to a player's feet, or in her hands, is at her
     strike_window_s: float           # a still ball lost from sight is taken by whoever reaches the spot within this long
     possession_carry_s: float        # the ball may run free or go unseen this long and still be hers if she is next at it
+    moving_h: float                  # a person covering this many of her heights a second is moving, not standing
+    break_min_s: float               # play has stopped for everyone when this long passes
+    break_moving_frac: float         # with fewer people moving than this share of what is usual in the footage
+    period_words: dict[str, str]     # what a reviewer calls a period starting, play breaking off between periods, and the end
 
 
 @dataclass(frozen=True)

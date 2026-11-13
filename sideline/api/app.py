@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from sideline import __version__
 from sideline.config import Settings, build_blobs, build_engine
-from sideline.db.models import EventDecision, Job, Match, ReviewDecision, StageRun
+from sideline.db.models import EventDecision, Job, Match, PeriodMark, ReviewDecision, StageRun
 from sideline.db.session import session_scope
 from sideline.pipeline import FETCH, enqueue_stages
 from sideline.possession import holders
@@ -34,7 +34,7 @@ from sideline.stages import DEFAULT_STAGES, ORDER
 from sideline.stages.s8_events import clock
 from sideline.storage.artifacts import ArtifactRef, ArtifactStore
 from sideline.storage.blobs import ImmutableWriteError
-from sideline.timeline import periods_from_sm
+from sideline.timeline import MARK_KINDS, MARK_SLACK_MS, periods_from_marks, periods_from_sm
 from sideline.verdicts import carry, seen
 
 VERDICTS = ("right", "wrong_type", "wrong_taker", "not_event")
@@ -150,6 +150,15 @@ class DecisionIn(BaseModel):
     corrected_track: Optional[int] = None
     decided_by: str = "coach"
     note: Optional[str] = None
+
+
+class MarkIn(BaseModel):
+    """A moment marked on the film: a period starts, play breaks off
+    between periods, or the match ends. Video time."""
+
+    kind: str
+    t_ms: int
+    decided_by: str = "coach"
 
 
 class TrackNameIn(BaseModel):
@@ -442,6 +451,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             if m is None:
                 raise HTTPException(404, "no such match")
             sport, roster, periods_node, kickoff = m.sport, m.roster, m.periods, m.kickoff_offset_ms
+            marks = [{"id": k.id, "kind": k.kind, "t_ms": k.t_ms, "decided_by": k.decided_by} for k in m.marks]
             decisions = (s.query(EventDecision).filter_by(match_id=match_id, events_version=s8.version)
                          .order_by(EventDecision.decided_at).all()) if s8 else []
             # Verdicts given on earlier events versions, newest version
@@ -462,11 +472,25 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         grammar = plugin.event_grammar(plugin.surface())
         s0 = _latest_complete(store, match_id, "s0_ingest")
         match_json = store.read_json(s0, "match.json") if s0 else {}
+        # What the reviewer marked on the film is the clock where it exists,
+        # and says which events fall outside play. The events themselves are
+        # as the stage wrote them until it runs again.
+        periods = periods_from_sm(periods_node or {})
+        marked = periods_from_marks(marks, kickoff)
+        if marked is not None:
+            kickoff, periods = marked
+
+        def in_play(t_ms: int) -> bool:
+            if marked is None:
+                return True
+            return any(p.start_ms - MARK_SLACK_MS <= t_ms and (p.end_ms is None or t_ms < p.end_ms) for p in periods)
+
+        for k in marks:
+            k["clock"] = clock(k["t_ms"], kickoff, periods)[0]
         events: list[dict] = []
         if s8 is not None:
             rows = store.read_table(s8, "events.parquet").to_pylist()
             log = store.read_json(s8, "dead_balls.json")
-            periods = periods_from_sm(periods_node or {})
             latest: dict[int, EventDecision] = {}
             for d in decisions:
                 latest[d.t_ms] = d                    # the newest verdict per event wins
@@ -496,6 +520,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     "t_ms": r["t_ms"], "clock": label, "clock_basis": basis, "type": r["type"],
                     "confidence": round(r["confidence"], 2), "reason": l["call"]["reason"],
                     "taker_track": r["track_id"], "player_id": r["player_id"] or names.get(r["track_id"]),
+                    "in_play": in_play(r["t_ms"]),
                     "team": r["team"], "cues": {k: l[k] for k in ("held", "still_s", "nearest_h", "n_near", "extreme_h", "landmarks_h", "release_speed_h")},
                     "decision": carried.get(r["t_ms"]) if d is None else {
                         "verdict": d.verdict, "corrected_type": d.corrected_type, "corrected_track": d.corrected_track,
@@ -508,6 +533,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                       "duration_ms": match_json.get("duration_ms"), "kickoff_offset_ms": kickoff},
             "events_version": s8.version if s8 else None, "tracks_version": tracks_version,
             "event_types": list(grammar.restart_types), "roster": roster or {}, "track_names": names,
+            "marks": marks, "period_words": dict(grammar.period_words),
             "events": events,
         }
 
@@ -616,6 +642,34 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         with session_scope(request.app.state.engine) as s:
             rows = s.query(EventDecision).filter_by(match_id=match_id).order_by(EventDecision.decided_at).all()
             return [_decision_out(d) for d in rows]
+
+    @app.post("/matches/{match_id}/review/marks", status_code=201)
+    def add_mark(match_id: str, body: MarkIn, request: Request) -> dict:
+        """Mark a moment of the film as a period starting, play breaking
+        off between periods, or the match ending. The page shows events
+        outside the marked periods as out of play at once; the events
+        stage reads the marks the next time it runs."""
+        if body.kind not in MARK_KINDS:
+            raise HTTPException(422, f"kind must be one of {MARK_KINDS}")
+        if body.t_ms < 0:
+            raise HTTPException(422, "t_ms is video time and cannot be negative")
+        with session_scope(request.app.state.engine) as s:
+            if s.get(Match, match_id) is None:
+                raise HTTPException(404, "no such match")
+            k = PeriodMark(match_id=match_id, kind=body.kind, t_ms=body.t_ms, decided_by=body.decided_by)
+            s.add(k)
+            s.flush()
+            return {"id": k.id, "kind": k.kind, "t_ms": k.t_ms, "decided_by": k.decided_by}
+
+    @app.delete("/matches/{match_id}/review/marks/{mark_id}")
+    def remove_mark(match_id: str, mark_id: str, request: Request) -> dict:
+        """Take back a mark set by mistake."""
+        with session_scope(request.app.state.engine) as s:
+            k = s.get(PeriodMark, mark_id)
+            if k is None or k.match_id != match_id:
+                raise HTTPException(404, "no such mark on this match")
+            s.delete(k)
+        return {"removed": mark_id}
 
     @app.post("/matches/{match_id}/review/tracks", status_code=201)
     def name_track(match_id: str, body: TrackNameIn, request: Request) -> dict:

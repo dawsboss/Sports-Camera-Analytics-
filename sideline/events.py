@@ -159,6 +159,74 @@ def merge_shifts(primary: Sequence[Optional[np.ndarray]], fallback: Sequence[np.
     return out, n
 
 
+def people_moving(frames: Sequence[Frame], shifts: Sequence[np.ndarray], grammar: EventGrammar,
+                  over_s: float = 2.0) -> list[int]:
+    """How many people in each frame are moving: faster than `moving_h` of
+    their own heights a second over the last `over_s`, the camera's motion
+    removed. Whoever was not in frame that long ago is not counted."""
+    cum = np.cumsum(np.array(shifts), axis=0) if len(frames) else np.zeros((0, 2))
+    out: list[int] = []
+    j = 0
+    for k, f in enumerate(frames):
+        while frames[j].t_ms < f.t_ms - over_s * 1000:
+            j += 1
+        dt = (f.t_ms - frames[j].t_ms) / 1000.0
+        if dt <= 0:
+            out.append(0)
+            continue
+        was = {b.track_id: b.centre - cum[j] for b in frames[j].people}
+        n = 0
+        for b in f.people:
+            p = was.get(b.track_id)
+            if p is not None and b.height > 0 and np.linalg.norm(b.centre - cum[k] - p) / b.height / dt >= grammar.moving_h:
+                n += 1
+        out.append(n)
+    return out
+
+
+def find_breaks(frames: Sequence[Frame], grammar: EventGrammar, shifts: Optional[Sequence[np.ndarray]] = None,
+                window_s: float = 30.0) -> list[tuple[int, int]]:
+    """Stretches in which play had stopped for everyone, as (start, end) in
+    video ms: at least `break_min_s` long, and in every `window_s` of it
+    fewer people were moving than `break_moving_frac` of what is usual in
+    this footage. Half-time is one; so is a long injury, and the wait
+    after the last whistle if the film runs on.
+
+    It is read from the people because nothing else is always there: a
+    follow-cam idles on the centre circle through the break and the grass
+    never leaves the frame, which is why S0's hint found nothing on the
+    second reviewed match, and a fixed camera sees the same pitch all
+    day. A ball lying still in such a stretch is not a restart waiting to
+    be taken, and the first one struck after half-time is the kick-off."""
+    if not frames:
+        return []
+    if shifts is None:
+        shifts = camera_shifts_from_people(frames)
+    moving = people_moving(frames, shifts, grammar)
+    step = window_s * 1000.0
+    t0 = frames[0].t_ms
+    per: dict[int, list[int]] = defaultdict(list)
+    for f, n in zip(frames, moving):
+        per[int((f.t_ms - t0) // step)].append(n)
+    last = max(per)
+    # A window nobody was seen in is as quiet as play gets.
+    level = [float(np.median(per[w])) if w in per else 0.0 for w in range(last + 1)]
+    usual = float(np.median([level[w] for w in per]))
+    if usual <= 0:
+        return []
+    out: list[tuple[int, int]] = []
+    start: Optional[int] = None
+    for w in range(last + 2):
+        quiet = w <= last and level[w] < grammar.break_moving_frac * usual
+        if quiet and start is None:
+            start = w
+        elif not quiet and start is not None:
+            if (w - start) * window_s >= grammar.break_min_s:
+                out.append((int(t0 + start * step), int(t0 + w * step)))
+            start = None
+    return out
+
+
 def height_scale(frames: Sequence[Frame], fallback: float) -> list[float]:
     """Median person height per frame, carried forward across frames with
     nobody in them, carried back before the first person, and `fallback`
@@ -254,7 +322,8 @@ def last_at_the_ball(frames: Sequence[Frame], idx: list[int], i: int, last: int,
 def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: tuple[int, int],
                     period_starts_ms: Sequence[int] = (), max_gap_samples: int = 3,
                     merge_s: float = 2.0, shifts: Optional[Sequence[np.ndarray]] = None,
-                    same_taker_s: float = 2.0, early_s: float = 5.0) -> list[DeadBall]:
+                    same_taker_s: float = 2.0, early_s: float = 5.0,
+                    breaks_ms: Sequence[tuple[int, int]] = ()) -> list[DeadBall]:
     """Every moment the ball sat still long enough and was then put back into
     play, with what was visible around it. One per restart after merging.
     `shifts` is the camera's motion between consecutive frames; without it
@@ -269,7 +338,12 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
 
     With period starts known, a ball dead more than `early_s` before the
     first of them is the warm-up, not the match, and is not reported. The
-    margin is for a whistle time typed by hand."""
+    margin is for a whistle time typed by hand, and every period is
+    entered that much early for the same reason.
+
+    Nothing put back into play inside one of `breaks_ms` (`find_breaks`) is
+    reported either: play had stopped for everyone, and a ball that leaves
+    its spot then was picked up or knocked about, not taken."""
     if not frames:
         return []
     W, H = frame_size
@@ -317,7 +391,7 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
             still_s = (frames[idx[last]].t_ms - frames[idx[i]].t_ms) / 1000.0
             if still_s >= grammar.dead_ball_min_s:
                 cand = self_contained(frames, idx, i, last, j, n, stab, heights, grammar, tid, (W, H), period_starts_ms,
-                                      max_gap_samples, cum)
+                                      max_gap_samples, cum, early_s)
                 if cand is not None:
                     raw.append(cand)
             i = j if j > i + 1 else i + 1
@@ -327,6 +401,8 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
     first_start = min(period_starts_ms) if len(period_starts_ms) else None
     for c in raw:
         if first_start is not None and c.obs["t_ms"] < first_start - early_s * 1000:
+            continue
+        if any(a <= c.obs["t_ms"] < b for a, b in breaks_ms):
             continue
         prev = kept[-1] if kept else None
         if prev is not None and c.obs["t_ms"] - prev.obs["t_ms"] < merge_s * 1000:
@@ -358,7 +434,7 @@ def find_dead_balls(frames: Sequence[Frame], grammar: EventGrammar, frame_size: 
 def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j: int, n: int, stab: np.ndarray,
                    heights: list[float], grammar: EventGrammar, tid: int, size: tuple[int, int],
                    period_starts_ms: Sequence[int], max_gap_samples: int = 3,
-                   cum: Optional[np.ndarray] = None) -> Optional[Candidate]:
+                   cum: Optional[np.ndarray] = None, early_s: float = 0.0) -> Optional[Candidate]:
     """Measure one still window: how it ended, who took it, what was around.
     Returns None when the window ended without a release the rules can use."""
     W, H = size
@@ -459,8 +535,11 @@ def self_contained(frames: Sequence[Frame], idx: list[int], i: int, last: int, j
     period, since = None, None
     starts = sorted(period_starts_ms)
     for pi, s in enumerate(starts):
-        if t_ms >= s:
-            period, since = pi, (t_ms - s) / 1000.0
+        # A period's start is a time somebody typed or tapped, and the dead
+        # ball it begins with is timed at when the ball was last seen at
+        # rest: the kick-off may sit a little before its own whistle.
+        if t_ms >= s - early_s * 1000:
+            period, since = pi, max(0.0, (t_ms - s) / 1000.0)
     obs = dict(
         t_ms=int(t_ms), still_s=float((end_frame.t_ms - frames[idx[i]].t_ms) / 1000.0),
         taker_track=taker_id, taker_cls=(late.cls if late is not None else taker.cls if taker is not None

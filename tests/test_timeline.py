@@ -76,3 +76,31 @@ def test_taps_from_a_soccer_manager_match_node():
     ]
     assert taps[3].at_ms == T0 + 1 and taps[3].id == "e1" and taps[2].at_ms is None
     assert [t.kind for t in taps_from_sm(node, collections=("events",))] == ["corner", "throw"]
+
+
+def test_marks_on_the_film_are_the_periods_on_the_videos_own_clock():
+    import pytest
+
+    from sideline.timeline import breaks_between, periods_from_marks
+
+    assert periods_from_marks([]) is None and periods_from_marks([], 246_000) is None
+    # Half-time, the second kick-off and the last whistle are enough: the
+    # kickoff typed at upload opens the first period.
+    marks = [{"kind": "start", "t_ms": 2_415_000}, {"kind": "end", "t_ms": 4_320_000}, {"kind": "break", "t_ms": 2_040_000}]
+    k0, periods = periods_from_marks(marks, 246_000)
+    assert k0 == 246_000
+    assert [(p.half, p.start_ms, p.end_ms) for p in periods] == [(1, 246_000, 2_040_000), (2, 2_415_000, 4_320_000)]
+    # The clock stops through the break, as with the minutes app's periods.
+    assert match_seconds(2_415_000 + 60_000, k0, periods) == pytest.approx((2_040_000 - 246_000) / 1000 + 60)
+    assert breaks_between(periods, 4_400_000) == [(2_040_000, 2_410_000), (4_320_000, 4_400_000)]
+    # A marked first kick-off is the kickoff, whatever was typed.
+    k0, periods = periods_from_marks(marks + [{"kind": "start", "t_ms": 250_000}], 246_000)
+    assert k0 == 250_000 and periods[0].start_ms == 250_000 and len(periods) == 2
+    # Two starts with no break between: the second closes the first where it stands.
+    k0, periods = periods_from_marks([{"kind": "start", "t_ms": 1_000}, {"kind": "start", "t_ms": 9_000}])
+    assert [(p.start_ms, p.end_ms) for p in periods] == [(1_000, 9_000), (9_000, None)]
+    assert breaks_between(periods, 20_000) == []
+    # Nothing counts after the end, and marks that open no period are no periods.
+    k0, periods = periods_from_marks([{"kind": "start", "t_ms": 0}, {"kind": "end", "t_ms": 5_000}, {"kind": "start", "t_ms": 8_000}])
+    assert [(p.start_ms, p.end_ms) for p in periods] == [(0, 5_000)]
+    assert periods_from_marks([{"kind": "end", "t_ms": 5_000}]) is None

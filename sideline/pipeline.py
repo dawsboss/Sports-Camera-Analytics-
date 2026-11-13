@@ -21,6 +21,7 @@ def record_of(m: Match) -> MatchRecord:
         id=m.id, capture_mode=m.capture_mode, source_key=m.source_key, sport=m.sport,
         sm_match_id=m.sm_match_id, pitch_length=m.pitch_length, pitch_width=m.pitch_width,
         kickoff_offset_ms=m.kickoff_offset_ms, periods=m.periods,
+        marks=[{"kind": k.kind, "t_ms": k.t_ms} for k in m.marks],
     )
 
 

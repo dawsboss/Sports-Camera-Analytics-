@@ -97,6 +97,65 @@ def periods_from_sm(node: dict) -> list[Period]:
     return sorted(out, key=lambda p: p.start_ms)
 
 
+# What a reviewer can mark on the film: a period starts, play breaks off
+# between periods, the match ends. What a sport calls them is its own
+# (`EventGrammar.period_words`).
+MARK_KINDS: tuple[str, ...] = ("start", "break", "end")
+# A start is marked on the frame the kick was seen in; the dead ball it
+# belongs to is timed at when the ball was last seen at rest, seconds
+# earlier. The same margin the first whistle gets for being typed by hand.
+MARK_SLACK_MS = 5000
+
+
+def periods_from_marks(marks: Iterable[dict], kickoff_offset_ms: Optional[int] = None) -> Optional[tuple[int, list[Period]]]:
+    """The periods a reviewer marked on the film, as (kickoff offset,
+    periods) with the periods on the video's own clock, so the offset is
+    simply where the first one starts and everything that takes an offset
+    and periods reads them unchanged. None when the marks open no period.
+
+    A start opens a period, closing one still open at the same instant; a
+    break or the end closes the open one; nothing counts after the end.
+    The kickoff typed at upload opens the first period when the earliest
+    mark is not itself a start, so marking half-time, the second kick-off
+    and the last whistle is enough."""
+    ordered = sorted(({"kind": m["kind"], "t_ms": int(m["t_ms"])} for m in marks), key=lambda m: m["t_ms"])
+    if not ordered:
+        return None
+    if ordered[0]["kind"] != "start" and kickoff_offset_ms is not None and kickoff_offset_ms < ordered[0]["t_ms"]:
+        ordered.insert(0, {"kind": "start", "t_ms": int(kickoff_offset_ms)})
+    periods: list[Period] = []
+    open_at: Optional[int] = None
+    for m in ordered:
+        if m["kind"] == "start":
+            if open_at is not None:
+                periods.append(Period(half=len(periods) + 1, start_ms=open_at, end_ms=m["t_ms"]))
+            open_at = m["t_ms"]
+        elif open_at is not None:
+            periods.append(Period(half=len(periods) + 1, start_ms=open_at, end_ms=m["t_ms"]))
+            open_at = None
+        if m["kind"] == "end":
+            break
+    else:
+        if open_at is not None:
+            periods.append(Period(half=len(periods) + 1, start_ms=open_at, end_ms=None))
+    return (periods[0].start_ms, periods) if periods else None
+
+
+def breaks_between(periods: Iterable[Period], until_ms: int, slack_ms: int = MARK_SLACK_MS) -> list[tuple[int, int]]:
+    """The stretches between marked periods, and from the end of the last
+    one to `until_ms`, as (start, end) on the periods' own clock. Each
+    stops `slack_ms` short of the period that follows it."""
+    ordered = sorted(periods, key=lambda p: p.start_ms)
+    out: list[tuple[int, int]] = []
+    for p, nxt in zip(ordered, ordered[1:] + [None]):
+        if p.end_ms is None:
+            continue
+        end = nxt.start_ms - slack_ms if nxt is not None else until_ms
+        if end > p.end_ms:
+            out.append((p.end_ms, end))
+    return out
+
+
 def stints_from_sm(node: dict) -> list[Stint]:
     """Parse soccer-manager's matches/{id}/stints node."""
     out = []
