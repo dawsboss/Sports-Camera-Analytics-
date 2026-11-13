@@ -41,15 +41,19 @@ def _said(verdict: dict, old: Seen, new: Seen, same_tracks: bool) -> dict:
     """An old verdict restated about the new event. What the reviewer said
     is a fact about the moment (nothing happened; it was a throw-in; she
     took it), and the verdict that states it depends on what the new
-    version calls the event."""
+    version calls the event. She may have said both at once: a corrected
+    kind is `wrong_type`, and it carries the corrected taker beside it."""
     if verdict["verdict"] == "not_event":
         return {"verdict": "not_event", "corrected_type": None, "corrected_track": None}
-    kind = verdict.get("corrected_type") if verdict["verdict"] == "wrong_type" else old.type
-    if kind != new.type:
-        return {"verdict": "wrong_type", "corrected_type": kind, "corrected_track": None}
-    track = verdict.get("corrected_track") if verdict["verdict"] == "wrong_taker" else None
+    corrected = verdict["verdict"] in ("wrong_type", "wrong_taker")
+    kind = (verdict.get("corrected_type") if corrected else None) or old.type
+    track = verdict.get("corrected_track") if corrected else None
     # A track id means something only within the tracking version it was tapped in.
-    if track is not None and same_tracks and track != new.track_id:
+    if track is None or not same_tracks or track == new.track_id:
+        track = None
+    if kind != new.type:
+        return {"verdict": "wrong_type", "corrected_type": kind, "corrected_track": track}
+    if track is not None:
         return {"verdict": "wrong_taker", "corrected_type": None, "corrected_track": track}
     return {"verdict": "right", "corrected_type": None, "corrected_track": None}
 

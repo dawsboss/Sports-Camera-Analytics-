@@ -283,13 +283,19 @@
 
   function who(e) {
     const d = e.decision;
-    const track = d && d.verdict === 'wrong_taker' ? d.corrected_track : e.taker_track;
+    const track = takerOf(e);
     const name = state.doc.track_names[String(track)] || (track === e.taker_track ? e.player_id : null);
     const roster = state.doc.roster || {};
     const label = name && roster[name] ? (roster[name].number != null ? `#${roster[name].number} ` : '') + (roster[name].name || name) : name;
     return label || (track ? `track ${track}` : 'nobody near');
   }
   function kindOf(e) { return e.decision && e.decision.verdict === 'wrong_type' ? e.decision.corrected_type : e.type; }
+  // Kind and taker can both be wrong, so a corrected kind may carry a corrected taker beside it.
+  function takerOf(e) {
+    const d = e.decision;
+    return d && (d.verdict === 'wrong_taker' || d.verdict === 'wrong_type') && d.corrected_track != null ? d.corrected_track : e.taker_track;
+  }
+  function said(d) { return d.verdict === 'wrong_type' && d.corrected_track != null ? 'wrong type + taker' : d.verdict.replace('_', ' '); }
 
   // The list narrows to one kind of event at a tap, by the name the list
   // shows: the pipeline's, or the reviewer's where she corrected it. The
@@ -349,7 +355,7 @@
       row.dataset.i = i;
       // A verdict given on an earlier run of the events and read through this one is drawn dashed.
       const from = e.decision && e.decision.carried_from;
-      const badge = e.decision ? `<span class="badge ${esc(e.decision.verdict)}${from ? ' carried' : ''}"${from ? ` title="carried from events v${esc(from.events_version)}"` : ''}>${esc(e.decision.verdict.replace('_', ' '))}</span>` : `<span class="badge">${esc(e.confidence)}</span>`;
+      const badge = e.decision ? `<span class="badge ${esc(e.decision.verdict)}${from ? ' carried' : ''}"${from ? ` title="carried from events v${esc(from.events_version)}"` : ''}>${esc(said(e.decision))}</span>` : `<span class="badge">${esc(e.confidence)}</span>`;
       row.innerHTML = `<span class="clock">${esc(e.clock)}</span><span><div class="kind">${esc(kindOf(e).replace('_', ' '))}</div><div class="who">${esc(who(e))}</div></span>${badge}`;
       row.addEventListener('click', () => select(i));
       el.appendChild(row);
@@ -436,7 +442,7 @@
     if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
     if (im && im.complete && im.naturalWidth) ctx.drawImage(im, 0, 0, W, H);
-    const taker = e.decision && e.decision.verdict === 'wrong_taker' ? e.decision.corrected_track : e.taker_track;
+    const taker = takerOf(e);
     const lw = Math.max(1, W / 960);
     for (const b of f.boxes) {
       const kind = state.kinds[b.cls] || 'person';
@@ -482,12 +488,18 @@
   }
   $('right').addEventListener('click', () => decide('right'));
   $('notevent').addEventListener('click', () => decide('not_event'));
-  // Naming what it was is one tap or one digit. The same name the
-  // pipeline gave is "right"; any other is a corrected kind.
-  function name(kind) {
+  // Naming what it was is one tap or one digit, and so is tapping who
+  // took it. Each keeps what was already said about the other, so an
+  // event can have both its kind and its taker corrected; with the
+  // pipeline's own kind and taker it is "right".
+  function correct(kind, track) {
     const e = state.doc.events[state.i]; if (!e) return;
-    if (kind === e.type) decide('right'); else decide('wrong_type', { corrected_type: kind });
+    const extra = {};
+    if (kind !== e.type) extra.corrected_type = kind;
+    if (track !== e.taker_track) extra.corrected_track = track;
+    decide(extra.corrected_type ? 'wrong_type' : 'corrected_track' in extra ? 'wrong_taker' : 'right', extra);
   }
+  function name(kind) { const e = state.doc.events[state.i]; if (e) correct(kind, takerOf(e)); }
   $('earlier').addEventListener('click', () => { stop(); extend(-1); });
   $('later').addEventListener('click', () => { stop(); extend(1); });
   $('wrongtaker').addEventListener('click', () => { state.pickTaker = !state.pickTaker; $('hint').hidden = !state.pickTaker; $('wrongtaker').classList.toggle('on', state.pickTaker); });
@@ -500,11 +512,11 @@
       .sort((a, b) => (a.x2 - a.x1) * (a.y2 - a.y1) - (b.x2 - b.x1) * (b.y2 - b.y1))[0];
     if (!hit) return;
     state.pickTaker = false; $('hint').hidden = true; $('wrongtaker').classList.remove('on');
-    decide('wrong_taker', { corrected_track: hit.track_id });
+    correct(kindOf(state.doc.events[state.i]), hit.track_id);
   });
   $('name').addEventListener('click', async () => {
     const e = state.doc.events[state.i]; if (!e) return;
-    const track = e.decision && e.decision.verdict === 'wrong_taker' ? e.decision.corrected_track : e.taker_track;
+    const track = takerOf(e);
     if (!track) return;
     const pid = $('roster').value;
     await api(`/matches/${matchId}/review/tracks`, { method: 'POST', headers: { 'content-type': 'application/json' },

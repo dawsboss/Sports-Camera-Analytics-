@@ -110,7 +110,10 @@ class ReviewDecision(Base):
 
 class EventDecision(Base):
     """A human's verdict on one event the pipeline wrote: right, wrong kind,
-    wrong taker, or not an event at all. An event has no id of its own, so
+    wrong taker, or not an event at all. Kind and taker can both be wrong:
+    that row is `wrong_type` with `corrected_track` set beside
+    `corrected_type`, so a reader of kinds alone reads it as before. An
+    event has no id of its own, so
     it is keyed by the events version it sits in and its time, which is
     unique within a version because dead balls closer than two seconds are
     merged. A new events version starts with no rows of its own; these
@@ -124,7 +127,7 @@ class EventDecision(Base):
     events_version: Mapped[int] = mapped_column(Integer)
     tracks_version: Mapped[int] = mapped_column(Integer)      # the S3 output the event's tracks belong to
     t_ms: Mapped[int] = mapped_column(Integer)
-    verdict: Mapped[str] = mapped_column(String(16))          # right | wrong_type | wrong_taker | not_event
+    verdict: Mapped[str] = mapped_column(String(16))          # right | wrong_type | wrong_taker | not_event; wrong_type may also correct the taker
     corrected_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     corrected_track: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)   # a track of tracks_version
     decided_by: Mapped[str] = mapped_column(String(128))

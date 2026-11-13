@@ -50,3 +50,15 @@ def test_a_corrected_taker_carries_only_within_the_same_tracking_version():
     assert carry(old, new, same_tracks=False)[10_000]["verdict"] == "right"
     # The new version already names track 12 as the taker.
     assert carry(old, [Seen(10_000, 8_000, "throw_in", 12)], True)[10_000]["verdict"] == "right"
+
+
+def test_a_corrected_kind_and_taker_carry_together():
+    old = [(Seen(10_000, 8_000, "restart", 7), v("wrong_type", corrected_type="throw_in", corrected_track=12))]
+    both = {**v("wrong_type", corrected_type="throw_in", corrected_track=12), "from_t_ms": 10_000}
+    assert carry(old, [Seen(10_000, 8_000, "restart", 7)], True)[10_000] == both
+    # The new version names it a throw-in: only the taker is still wrong.
+    assert carry(old, [Seen(10_000, 8_000, "throw_in", 7)], True)[10_000] == {**v("wrong_taker", corrected_track=12), "from_t_ms": 10_000}
+    # It names track 12 instead: only the kind is still wrong.
+    assert carry(old, [Seen(10_000, 8_000, "restart", 12)], True)[10_000] == {**v("wrong_type", corrected_type="throw_in"), "from_t_ms": 10_000}
+    # Another tracking run: the kind carries, the track does not.
+    assert carry(old, [Seen(10_000, 8_000, "restart", 7)], False)[10_000] == {**v("wrong_type", corrected_type="throw_in"), "from_t_ms": 10_000}

@@ -592,6 +592,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if body.verdict == "wrong_taker":
             if body.corrected_track is None:
                 raise HTTPException(422, "wrong_taker needs corrected_track")
+            if body.corrected_type:
+                raise HTTPException(422, "a corrected kind is wrong_type, which may carry corrected_track as well")
+        # Kind and taker can both be wrong: wrong_type may name the taker too.
+        if body.verdict in ("wrong_type", "wrong_taker") and body.corrected_track is not None:
             if tracks_version is None:
                 raise HTTPException(422, "this events version records no tracking version to name a track in")
             frags = store.read_table(ArtifactRef(match_id, "s3_tracking", tracks_version), "fragments.parquet")

@@ -242,7 +242,8 @@ what surrounded it in heights of the taker, never in metres or pixels.
 - **The review page is for events only, and the verdicts are read back
   only by the page itself.** `web/review.html`, served by the API at `/review` with a
   same-origin content policy, writes `EventDecision` rows (right / wrong
-  kind / wrong taker / not an event, each checked against a real events
+  kind / wrong taker / not an event; a wrong kind may correct the taker in
+  the same row; each checked against a real events
   version, an event in it, the sport's event types and a track of the
   tracking version it was built on) and `ReviewDecision` rows for a
   track's name, scoped to that tracking version. A new events version has

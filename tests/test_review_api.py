@@ -142,6 +142,16 @@ def test_verdicts_are_checked_against_what_exists(reviewed):
                  if b["cls"] == "player" and b["track_id"] != e["taker_track"])
     r = c.post(f"/matches/{match_id}/review/decisions", json={**ok, "verdict": "wrong_taker", "corrected_track": other})
     assert r.status_code == 201 and r.json()["tracks_version"] == doc["tracks_version"] and r.json()["corrected_track"] == other
+    # Kind and taker can both be wrong. That is one row, wrong_type with the
+    # taker beside it, and its track is checked like any other.
+    both = {**ok, "verdict": "wrong_type", "corrected_type": "free_kick"}
+    assert c.post(f"/matches/{match_id}/review/decisions", json={**both, "corrected_track": 999}).status_code == 422
+    assert c.post(f"/matches/{match_id}/review/decisions",
+                  json={**ok, "verdict": "wrong_taker", "corrected_type": "free_kick", "corrected_track": other}).status_code == 422
+    r = c.post(f"/matches/{match_id}/review/decisions", json={**both, "corrected_track": other})
+    assert r.status_code == 201
+    d = c.get(f"/matches/{match_id}/review").json()["events"][0]["decision"]
+    assert (d["verdict"], d["corrected_type"], d["corrected_track"]) == ("wrong_type", "free_kick", other)
 
 
 def test_names_belong_to_one_tracking_version(reviewed):
